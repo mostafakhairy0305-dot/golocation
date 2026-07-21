@@ -178,11 +178,36 @@ func TestAsUint64AcceptsOnlyNonNegativeIntegers(t *testing.T) {
 func TestMapGeoClueErrorPicksTheSentinelAndTheRetryHint(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]struct {
-		err           error
-		want          error
-		wantTemporary bool
-	}{
+	for name, testCase := range mapGeoClueErrorCases() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := mapGeoClueError("connect", testCase.err)
+
+			if testCase.want != nil && !errors.Is(got, testCase.want) {
+				t.Errorf("error = %v, want %v", got, testCase.want)
+			}
+
+			// The cause always survives, whichever sentinel was chosen.
+			if !errors.Is(got, testCase.err) {
+				t.Errorf("error = %v, want it to still wrap %v", got, testCase.err)
+			}
+
+			expectAnnotation(t, got, "connect", testCase.wantTemporary)
+		})
+	}
+}
+
+// mapGeoClueErrorCase is one D-Bus failure and the sentinel plus retry hint the
+// caller should end up seeing for it.
+type mapGeoClueErrorCase struct {
+	err           error
+	want          error
+	wantTemporary bool
+}
+
+func mapGeoClueErrorCases() map[string]mapGeoClueErrorCase {
+	return map[string]mapGeoClueErrorCase{
 		"access denied": {
 			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.AccessDenied", Body: nil},
 			want:          geo.ErrPermissionDenied,
@@ -222,24 +247,6 @@ func TestMapGeoClueErrorPicksTheSentinelAndTheRetryHint(t *testing.T) {
 			want:          nil,
 			wantTemporary: true,
 		},
-	}
-	for name, testCase := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := mapGeoClueError("connect", testCase.err)
-
-			if testCase.want != nil && !errors.Is(got, testCase.want) {
-				t.Errorf("error = %v, want %v", got, testCase.want)
-			}
-
-			// The cause always survives, whichever sentinel was chosen.
-			if !errors.Is(got, testCase.err) {
-				t.Errorf("error = %v, want it to still wrap %v", got, testCase.err)
-			}
-
-			expectAnnotation(t, got, "connect", testCase.wantTemporary)
-		})
 	}
 }
 

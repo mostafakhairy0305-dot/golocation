@@ -1,6 +1,6 @@
 module github.com/mostafakhairy0305-dot/golocation
 
-go 1.25.0
+go 1.25.10
 
 require (
 	github.com/deploymenttheory/go-bindings-win32 v0.2.0
