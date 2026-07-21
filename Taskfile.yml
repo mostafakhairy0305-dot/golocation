@@ -19,7 +19,7 @@ includes:
             # top of the brew install). CI pins Go via go-version-file in
             # .github/actions/setup, not from here. A value must be go-prefixed,
             # e.g. go1.26.5 — a bare 1.26.5 fails the format precondition.
-            GO_VERSION: ""
+            GO_VERSION: "v1.26.5"
             # Pinned, not floating: an empty value resolves to @latest, so CI
             # installs today's release while a developer machine keeps whatever
             # binary it already has. Same input, different findings.
