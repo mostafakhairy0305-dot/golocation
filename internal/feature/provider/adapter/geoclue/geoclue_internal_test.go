@@ -189,17 +189,26 @@ func TestMapGeoClueErrorPicksTheSentinelAndTheRetryHint(t *testing.T) {
 			wantTemporary: false,
 		},
 		"not authorized": {
-			err:           &dbus.Error{Name: "org.freedesktop.GeoClue2.Error.NotAuthorized", Body: nil},
+			err: &dbus.Error{
+				Name: "org.freedesktop.GeoClue2.Error.NotAuthorized",
+				Body: nil,
+			},
 			want:          geo.ErrPermissionDenied,
 			wantTemporary: false,
 		},
 		"service unknown": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown", Body: nil},
+			err: &dbus.Error{
+				Name: "org.freedesktop.DBus.Error.ServiceUnknown",
+				Body: nil,
+			},
 			want:          geo.ErrServiceUnavailable,
 			wantTemporary: true,
 		},
 		"name has no owner": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.NameHasNoOwner", Body: nil},
+			err: &dbus.Error{
+				Name: "org.freedesktop.DBus.Error.NameHasNoOwner",
+				Body: nil,
+			},
 			want:          geo.ErrServiceUnavailable,
 			wantTemporary: true,
 		},
