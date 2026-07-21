@@ -14,10 +14,16 @@ import (
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
 
+// errTransport stands for a failure that never reached GeoClue at all, which is
+// the case mapGeoClueError has to fall through on.
+var errTransport = errors.New("dial unix: connection refused")
+
 // GeoClue takes an accuracy *level*, not metres, so the mapping is a lossy
 // bucketing the caller cannot see. Getting a boundary wrong asks the service
 // for city-level precision when the caller wanted a street address.
 func TestGeoClueAccuracyBucketsTheRequest(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		opts Options
 		want uint32
@@ -45,10 +51,12 @@ func TestGeoClueAccuracyBucketsTheRequest(t *testing.T) {
 			want: 6,
 		},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := geoClueAccuracy(tc.opts); got != tc.want {
-				t.Fatalf("geoClueAccuracy = %d, want %d", got, tc.want)
+			t.Parallel()
+
+			if got := geoClueAccuracy(testCase.opts); got != testCase.want {
+				t.Fatalf("geoClueAccuracy = %d, want %d", got, testCase.want)
 			}
 		})
 	}
@@ -59,6 +67,8 @@ func TestGeoClueAccuracyBucketsTheRequest(t *testing.T) {
 // coordinate, which is where a NaN would otherwise be caught far from its
 // cause.
 func TestVariantFloat64RejectsAnythingUnusable(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		variant dbus.Variant
 		want    float64
@@ -67,21 +77,24 @@ func TestVariantFloat64RejectsAnythingUnusable(t *testing.T) {
 		"a float":           {variant: dbus.MakeVariant(float64(51.5)), want: 51.5, wantOK: true},
 		"a negative float":  {variant: dbus.MakeVariant(float64(-0.12)), want: -0.12, wantOK: true},
 		"zero":              {variant: dbus.MakeVariant(float64(0)), want: 0, wantOK: true},
-		"an empty variant":  {variant: dbus.Variant{}, wantOK: false},
-		"a string":          {variant: dbus.MakeVariant("51.5"), wantOK: false},
-		"an integer":        {variant: dbus.MakeVariant(int32(51)), wantOK: false},
-		"NaN":               {variant: dbus.MakeVariant(math.NaN()), wantOK: false},
-		"positive infinity": {variant: dbus.MakeVariant(math.Inf(1)), wantOK: false},
-		"negative infinity": {variant: dbus.MakeVariant(math.Inf(-1)), wantOK: false},
+		"an empty variant":  {variant: dbus.Variant{}, want: 0, wantOK: false},
+		"a string":          {variant: dbus.MakeVariant("51.5"), want: 0, wantOK: false},
+		"an integer":        {variant: dbus.MakeVariant(int32(51)), want: 0, wantOK: false},
+		"NaN":               {variant: dbus.MakeVariant(math.NaN()), want: 0, wantOK: false},
+		"positive infinity": {variant: dbus.MakeVariant(math.Inf(1)), want: 0, wantOK: false},
+		"negative infinity": {variant: dbus.MakeVariant(math.Inf(-1)), want: 0, wantOK: false},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, ok := variantFloat64(tc.variant)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			t.Parallel()
+
+			got, ok := variantFloat64(testCase.variant)
+			if ok != testCase.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, testCase.wantOK)
 			}
-			if ok && got != tc.want {
-				t.Fatalf("value = %v, want %v", got, tc.want)
+
+			if ok && got != testCase.want {
+				t.Fatalf("value = %v, want %v", got, testCase.want)
 			}
 		})
 	}
@@ -92,7 +105,9 @@ func TestVariantFloat64RejectsAnythingUnusable(t *testing.T) {
 // built. Every shape has to decode; anything else silently zeroes the fix
 // timestamp and makes every sample look infinitely stale.
 func TestGeoClueTimestampDecodesEveryShapeItArrivesIn(t *testing.T) {
-	want := time.Unix(1784030400, 250000*1000).UTC()
+	t.Parallel()
+
+	want := time.Unix(1784030400, 250000*int64(time.Microsecond)).UTC()
 
 	cases := map[string]struct {
 		variant dbus.Variant
@@ -110,11 +125,12 @@ func TestGeoClueTimestampDecodesEveryShapeItArrivesIn(t *testing.T) {
 		"the wrong type":   {variant: dbus.MakeVariant("1784030400"), want: time.Time{}},
 		"a truncated pair": {variant: dbus.MakeVariant([]uint64{1784030400}), want: time.Time{}},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := geoClueTimestamp(tc.variant)
-			if !got.Equal(tc.want) {
-				t.Fatalf("geoClueTimestamp = %v, want %v", got, tc.want)
+			t.Parallel()
+
+			if got := geoClueTimestamp(testCase.variant); !got.Equal(testCase.want) {
+				t.Fatalf("geoClueTimestamp = %v, want %v", got, testCase.want)
 			}
 		})
 	}
@@ -124,6 +140,8 @@ func TestGeoClueTimestampDecodesEveryShapeItArrivesIn(t *testing.T) {
 // billion years out, so the sign check is what keeps a malformed reply from
 // looking merely far-future rather than invalid.
 func TestAsUint64AcceptsOnlyNonNegativeIntegers(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		value  any
 		want   uint64
@@ -133,19 +151,22 @@ func TestAsUint64AcceptsOnlyNonNegativeIntegers(t *testing.T) {
 		"uint32":           {value: uint32(42), want: 42, wantOK: true},
 		"a positive int64": {value: int64(42), want: 42, wantOK: true},
 		"zero":             {value: int64(0), want: 0, wantOK: true},
-		"a negative int64": {value: int64(-1), wantOK: false},
-		"a float":          {value: float64(42), wantOK: false},
-		"a string":         {value: "42", wantOK: false},
-		"nothing at all":   {value: nil, wantOK: false},
+		"a negative int64": {value: int64(-1), want: 0, wantOK: false},
+		"a float":          {value: float64(42), want: 0, wantOK: false},
+		"a string":         {value: "42", want: 0, wantOK: false},
+		"nothing at all":   {value: nil, want: 0, wantOK: false},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, ok := asUint64(tc.value)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			t.Parallel()
+
+			got, ok := asUint64(testCase.value)
+			if ok != testCase.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, testCase.wantOK)
 			}
-			if ok && got != tc.want {
-				t.Fatalf("value = %d, want %d", got, tc.want)
+
+			if ok && got != testCase.want {
+				t.Fatalf("value = %d, want %d", got, testCase.want)
 			}
 		})
 	}
@@ -155,81 +176,107 @@ func TestAsUint64AcceptsOnlyNonNegativeIntegers(t *testing.T) {
 // backend reconnects. Marking a permission denial temporary would spin the
 // reconnect loop forever against a decision only the user can change.
 func TestMapGeoClueErrorPicksTheSentinelAndTheRetryHint(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		err           error
 		want          error
 		wantTemporary bool
 	}{
 		"access denied": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.AccessDenied"},
+			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.AccessDenied", Body: nil},
 			want:          geo.ErrPermissionDenied,
 			wantTemporary: false,
 		},
 		"not authorized": {
-			err:           &dbus.Error{Name: "org.freedesktop.GeoClue2.Error.NotAuthorized"},
+			err:           &dbus.Error{Name: "org.freedesktop.GeoClue2.Error.NotAuthorized", Body: nil},
 			want:          geo.ErrPermissionDenied,
 			wantTemporary: false,
 		},
 		"service unknown": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown"},
+			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.ServiceUnknown", Body: nil},
 			want:          geo.ErrServiceUnavailable,
 			wantTemporary: true,
 		},
 		"name has no owner": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.NameHasNoOwner"},
+			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.NameHasNoOwner", Body: nil},
 			want:          geo.ErrServiceUnavailable,
 			wantTemporary: true,
 		},
 		"an unrecognised D-Bus error": {
-			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.Failed"},
+			err:           &dbus.Error{Name: "org.freedesktop.DBus.Error.Failed", Body: nil},
+			want:          nil,
 			wantTemporary: true,
 		},
 		"not a D-Bus error at all": {
-			err:           errors.New("dial unix: connection refused"),
+			err:           errTransport,
+			want:          nil,
 			wantTemporary: true,
 		},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := mapGeoClueError("connect", tc.err)
+			t.Parallel()
 
-			if tc.want != nil && !errors.Is(got, tc.want) {
-				t.Errorf("error = %v, want %v", got, tc.want)
+			got := mapGeoClueError("connect", testCase.err)
+
+			if testCase.want != nil && !errors.Is(got, testCase.want) {
+				t.Errorf("error = %v, want %v", got, testCase.want)
 			}
+
 			// The cause always survives, whichever sentinel was chosen.
-			if !errors.Is(got, tc.err) {
-				t.Errorf("error = %v, want it to still wrap %v", got, tc.err)
+			if !errors.Is(got, testCase.err) {
+				t.Errorf("error = %v, want it to still wrap %v", got, testCase.err)
 			}
 
-			var annotated *geo.Error
-			if !errors.As(got, &annotated) {
-				t.Fatalf("error = %v, want a *geo.Error", got)
-			}
-			if annotated.Platform != platform {
-				t.Errorf("platform = %q, want %q", annotated.Platform, platform)
-			}
-			if annotated.Op != "connect" {
-				t.Errorf("op = %q, want %q", annotated.Op, "connect")
-			}
-			if annotated.Temporary != tc.wantTemporary {
-				t.Errorf("Temporary = %v, want %v", annotated.Temporary, tc.wantTemporary)
-			}
+			expectAnnotation(t, got, "connect", testCase.wantTemporary)
 		})
+	}
+}
+
+// expectAnnotation fails for every piece of context mapGeoClueError should have
+// attached, which is what a caller reads to tell one failure from another.
+func expectAnnotation(t *testing.T, got error, wantOp string, wantTemporary bool) {
+	t.Helper()
+
+	var annotated *geo.Error
+
+	if !errors.As(got, &annotated) {
+		t.Fatalf("error = %v, want a *geo.Error", got)
+	}
+
+	if annotated.Platform != platform {
+		t.Errorf("platform = %q, want %q", annotated.Platform, platform)
+	}
+
+	if annotated.Op != wantOp {
+		t.Errorf("op = %q, want %q", annotated.Op, wantOp)
+	}
+
+	if annotated.Temporary != wantTemporary {
+		t.Errorf("Temporary = %v, want %v", annotated.Temporary, wantTemporary)
 	}
 }
 
 // The reconnect loop uses the return value to decide whether to try again, so
 // a cancelled context reporting true would keep reconnecting after Stop.
 func TestSleepContextReportsWhetherItSleptOrWasCancelled(t *testing.T) {
+	t.Parallel()
+
 	t.Run("the timer wins", func(t *testing.T) {
+		t.Parallel()
+
 		if !sleepContext(context.Background(), time.Millisecond) {
 			t.Fatal("sleepContext = false, want true after sleeping out the duration")
 		}
 	})
 
 	t.Run("the context wins", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
+
 		if sleepContext(ctx, time.Hour) {
 			t.Fatal("sleepContext = true, want false on a cancelled context")
 		}
@@ -239,13 +286,18 @@ func TestSleepContextReportsWhetherItSleptOrWasCancelled(t *testing.T) {
 	// wait, so a misconfigured policy cannot turn the reconnect loop into a
 	// busy loop against the bus.
 	t.Run("a non-positive duration does not become a busy loop", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
+
 		start := time.Now()
+
 		if sleepContext(ctx, 0) {
 			t.Fatal("sleepContext = true, want false on a cancelled context")
 		}
-		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+
+		if elapsed := time.Since(start); elapsed > time.Second/2 {
 			t.Fatalf("cancellation took %v, want it to return promptly", elapsed)
 		}
 	})
