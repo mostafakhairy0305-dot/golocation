@@ -4,12 +4,14 @@ version: "3"
 includes:
     taskotter:
         taskfile: taskfiles/Taskfile.yml
+vars:
+    GOOS_LIST: [linux, darwin, windows]
 tasks:
     ci:
         desc: Run Ci checks
         cmds:
-            - task: taskfile:fmt:check
-            - task: taskfile:lint
+            - task: fmt:check
+            - task: lint
             - task: test
             - task: test:race
             - task: vet
@@ -18,8 +20,8 @@ tasks:
     ci:fix:
         desc: Run Ci fixing
         cmds:
-            - task: taskfile:fmt
-            - task: taskfile:lint:fix
+            - task: fmt
+            - task: lint:fix
     lint:
         run: once
         desc: Run every lint check from the included taskfiles
@@ -28,12 +30,12 @@ tasks:
             formatters, govulncheck, gosec), staticcheck, actionlint, yamllint,
             zizmor, and shellcheck.
         deps:
-            - taskfile:go:lint
-            - taskfile:staticcheck:lint
-            - taskfile:actionlint:lint
-            - taskfile:yamllint:lint
-            - taskfile:zizmor:lint
-            - taskfile:shellcheck:lint
+            - taskotter:go:lint
+            - taskotter:staticcheck:lint
+            - taskotter:actionlint:lint
+            - taskotter:yamllint:lint
+            - taskotter:zizmor:lint
+            - taskotter:shellcheck:lint
     lint:fix:
         run: once
         desc: Auto-fix lint issues across the included taskfiles
@@ -43,8 +45,8 @@ tasks:
             fix mode (staticcheck, actionlint, zizmor, shellcheck) are skipped;
             run lint to see their findings.
         cmds:
-            - task: taskfile:go:lint:fix
-            - task: taskfile:yamllint:lint:fix
+            - task: taskotter:go:lint:fix
+            - task: taskotter:yamllint:lint:fix
     fmt:
         run: once
         desc: Format sources across the included taskfiles
@@ -52,8 +54,8 @@ tasks:
             Rewrite files with the formatters of the included taskfiles: Go files via
             golangci-lint formatters and YAML files via yamlfix.
         cmds:
-            - task: taskfile:go:fmt
-            - task: taskfile:yamllint:lint:fix
+            - task: taskotter:go:fmt
+            - task: taskotter:yamllint:lint:fix
     fmt:check:
         run: once
         desc: Check formatting across the included taskfiles without writing
@@ -61,8 +63,8 @@ tasks:
             Verify formatting without modifying files: Go files via golangci-lint
             formatters and YAML files via yamllint. Use fmt to apply fixes.
         deps:
-            - taskfile:go:fmt:check
-            - taskfile:yamllint:lint
+            - taskotter:go:fmt:check
+            - taskotter:yamllint:lint
     test:
         run: once
         desc: Run the Go test suite (TARGET=./...)
