@@ -1,0 +1,5 @@
+# Coverage artifacts produced by scripts/cover.sh.
+cover.out
+cover.raw.out
+cover.totals
+cover.html

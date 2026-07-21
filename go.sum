@@ -1,0 +1,10 @@
+github.com/deploymenttheory/go-bindings-win32 v0.2.0 h1:3zSe8LgsM4Wp7GyHEVx5Dq1QrAqnRhco9i/n3BBS60A=
+github.com/deploymenttheory/go-bindings-win32 v0.2.0/go.mod h1:UarxmarCUUYkXbjfawy4oWVNmBT+X8YAPaPG0E2DsE0=
+github.com/deploymenttheory/go-bindings-winrt v0.3.0 h1:y+SrAUIkJWtOoWMQry/78x33M+K1tMH/XSFk9CgqRk0=
+github.com/deploymenttheory/go-bindings-winrt v0.3.0/go.mod h1:CD48edmVPbFZB9Q20thEwwvzEJqiMirWxSMyh8aMd5w=
+github.com/ebitengine/purego v0.10.2 h1:W809HbnvzAxgdm+aOvlSekrM16wGCdT/e76+9tS7gzE=
+github.com/ebitengine/purego v0.10.2/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
+github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
+golang.org/x/sys v0.27.0 h1:wBqf8DvsY9Y/2P8gAfPDEYNuS30J4lPHJxXSb/nJZ+s=
+golang.org/x/sys v0.27.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
