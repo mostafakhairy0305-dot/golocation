@@ -1,9 +1,7 @@
 ---
 extends: default
 
-ignore: |
-  taskfiles/**
-  .taskotter/**
+ignore: [taskfiles/**, .taskotter/**]
 
 rules:
   comments:

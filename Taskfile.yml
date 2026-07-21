@@ -14,10 +14,18 @@ includes:
             GO_CMD_UNIX: "{{.GO_BIN_UNIX}}/go"
             GO_VERSION_URL: https://go.dev/VERSION?m=text
             GO_DOWNLOAD_BASE_URL: https://go.dev/dl
+            # Empty on purpose: macOS installs Go through Homebrew, and any value
+            # here switches to the official .pkg installer instead (sudo, over the
+            # top of the brew install). CI pins Go via go-version-file in
+            # .github/actions/setup, not from here. A value must be go-prefixed,
+            # e.g. go1.26.5 — a bare 1.26.5 fails the format precondition.
             GO_VERSION: ""
-            GOLANGCI_LINT_VERSION: ""
-            GOVULNCHECK_VERSION: ""
-            GOSEC_VERSION: ""
+            # Pinned, not floating: an empty value resolves to @latest, so CI
+            # installs today's release while a developer machine keeps whatever
+            # binary it already has. Same input, different findings.
+            GOLANGCI_LINT_VERSION: "v2.12.2"
+            GOVULNCHECK_VERSION: "v1.6.0"
+            GOSEC_VERSION: "v2.28.0"
             GLOBAL_GO_BIN:
                 sh: |
                     gobin="${GOBIN:-}"
@@ -57,26 +65,30 @@ includes:
             TARGETS: "."
             CONFIG: ""
             EXTRA_ARGS: ""
-            YAMLLINT_VERSION: ""
-            YAMLFIX_VERSION: ""
+            YAMLLINT_VERSION: "1.38.0"
+            YAMLFIX_VERSION: "1.19.1"
     zizmor:
         taskfile: taskfiles/zizmor/Taskfile.yml
         vars:
             ZIZMOR_EXTRA_ARGS: "--offline"
             ZIZMOR_TARGETS: ".github"
-            ZIZMOR_VERSION: "1.25.2"
+            ZIZMOR_VERSION: "1.27.0"
     shellcheck:
         taskfile: taskfiles/shellcheck/Taskfile.yml
         vars:
             EXTRA_ARGS: ""
             TARGETS: ""
+            # Deliberately unpinned. ShellCheck installs from the platform package
+            # manager, so a version here becomes brew shellcheck@X (no such
+            # formula) or apt shellcheck=X (Ubuntu ships its own revision string).
+            # Pinning the number would break the install on both.
             VERSION: ""
     adrs:
         taskfile: taskfiles/adrs/Taskfile.yml
         vars:
             CARGO_BIN_UNIX: "$HOME/.cargo/bin"
             EXTRA_ARGS: ""
-            ADRS_VERSION: ""
+            ADRS_VERSION: "0.10.0"
 tasks:
     ci:
         desc: Run Ci checks
