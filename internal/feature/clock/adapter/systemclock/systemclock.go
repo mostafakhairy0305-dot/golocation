@@ -13,4 +13,5 @@ type Clock struct{}
 
 var _ clock.Clock = Clock{}
 
+// Now returns the current wall-clock time in UTC.
 func (Clock) Now() time.Time { return time.Now().UTC() }

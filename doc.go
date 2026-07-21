@@ -2,10 +2,10 @@
 // native provider on each operating system: CoreLocation on macOS, GeoClue2 on
 // Linux, and Windows.Devices.Geolocation on Windows.
 //
-// Open starts a provider and returns a Locator. Current serves a cached fix
-// when one is fresh enough and otherwise waits; Next always waits for a new
-// one; Subscribe opens an independent stream. Close stops the provider and
-// closes every subscription.
+// Open starts a provider and returns a [Session], which implements [Locator].
+// Current serves a cached fix when one is fresh enough and otherwise waits;
+// Next always waits for a new one; Subscribe opens an independent stream. Close
+// stops the provider and closes every subscription.
 //
 //	loc, err := location.Open(ctx, location.DefaultConfig())
 //	if err != nil {
@@ -24,7 +24,7 @@
 //
 //   - geo holds the domain values (Fix, Status, the error vocabulary) and
 //     depends only on the standard library.
-//   - internal/core sequences the features and satisfies Locator.
+//   - internal/core sequences the features; Session forwards to it.
 //   - internal/feature/* is one package per capability.
 //
 // Every feature has the same shape — port/ declares the contract and nothing
@@ -46,8 +46,9 @@
 //
 // The operating system is an adapter like any other: it implements
 // provider.Provider, and provider.Factory is the port that chooses between
-// implementations. internal/feature/provider/platform provides the Factory
-// bound at build time — the only build-tagged code outside the adapters.
+// implementations and attaches the one it built to a provider.Host.
+// internal/feature/provider/platform provides the Factory bound at build time —
+// the only build-tagged code outside the adapters.
 //
 // Nothing is shared between features except geo. A concept belongs to exactly
 // one of them, which is why DropPolicy lives with fan-out and Accuracy lives

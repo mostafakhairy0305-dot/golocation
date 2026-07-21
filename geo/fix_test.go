@@ -1,48 +1,54 @@
-package geo
+package geo_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/mostafakhairy0305-dot/golocation/geo"
 )
 
 // Fields is a bitset, so the case that matters is a fix carrying one optional
 // field being asked about a different one — a plain non-zero test would say
 // yes to every field the moment any single one was present.
 func TestHasReportsOnlyTheFieldsActuallySet(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
-		fields Field
-		field  Field
+		fields geo.Field
+		field  geo.Field
 		want   bool
 	}{
-		"none set":            {fields: 0, field: FieldAltitude, want: false},
-		"the one set":         {fields: FieldAltitude, field: FieldAltitude, want: true},
-		"a different one set": {fields: FieldAltitude, field: FieldSpeed, want: false},
+		"none set":            {fields: 0, field: geo.FieldAltitude, want: false},
+		"the one set":         {fields: geo.FieldAltitude, field: geo.FieldAltitude, want: true},
+		"a different one set": {fields: geo.FieldAltitude, field: geo.FieldSpeed, want: false},
 		"one of several": {
-			fields: FieldAltitude | FieldSpeed,
-			field:  FieldSpeed,
+			fields: geo.FieldAltitude | geo.FieldSpeed,
+			field:  geo.FieldSpeed,
 			want:   true,
 		},
 		"absent among several": {
-			fields: FieldAltitude | FieldSpeed,
-			field:  FieldHeading,
+			fields: geo.FieldAltitude | geo.FieldSpeed,
+			field:  geo.FieldHeading,
 			want:   false,
 		},
 		"vertical accuracy set": {
-			fields: FieldVerticalAccuracy,
-			field:  FieldVerticalAccuracy,
+			fields: geo.FieldVerticalAccuracy,
+			field:  geo.FieldVerticalAccuracy,
 			want:   true,
 		},
 		"all set": {
-			fields: FieldAltitude | FieldVerticalAccuracy | FieldSpeed | FieldHeading,
-			field:  FieldHeading,
+			fields: geo.FieldAltitude | geo.FieldVerticalAccuracy | geo.FieldSpeed | geo.FieldHeading,
+			field:  geo.FieldHeading,
 			want:   true,
 		},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			fix := Fix{Fields: tc.fields}
-			if got := fix.Has(tc.field); got != tc.want {
-				t.Fatalf("Has(%d) = %v, want %v", tc.field, got, tc.want)
+			t.Parallel()
+
+			fix := geo.Fix{Fields: testCase.fields}
+			if got := fix.Has(testCase.field); got != testCase.want {
+				t.Fatalf("Has(%d) = %v, want %v", testCase.field, got, testCase.want)
 			}
 		})
 	}
@@ -52,6 +58,8 @@ func TestHasReportsOnlyTheFieldsActuallySet(t *testing.T) {
 // report it as such rather than clamping, because IsFresh is what decides how
 // much future to tolerate.
 func TestAgeIsSignedRelativeToNow(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
 	cases := map[string]struct {
@@ -62,11 +70,13 @@ func TestAgeIsSignedRelativeToNow(t *testing.T) {
 		"now":    {stamp: now, want: 0},
 		"future": {stamp: now.Add(30 * time.Second), want: -30 * time.Second},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			fix := Fix{Timestamp: tc.stamp}
-			if got := fix.Age(now); got != tc.want {
-				t.Fatalf("Age = %v, want %v", got, tc.want)
+			t.Parallel()
+
+			fix := geo.Fix{Timestamp: testCase.stamp}
+			if got := fix.Age(now); got != testCase.want {
+				t.Fatalf("Age = %v, want %v", got, testCase.want)
 			}
 		})
 	}

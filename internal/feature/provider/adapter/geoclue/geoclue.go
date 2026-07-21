@@ -29,45 +29,54 @@ const (
 
 // Options are the GeoClue-specific knobs, including the reconnect policy and
 // the desktop ID GeoClue uses to look up this application's permissions.
+// An unset knob means "leave the GeoClue default alone".
 type Options struct {
-	Accuracy              provider.Accuracy
-	DesiredAccuracyMeters uint32
-	MinimumInterval       time.Duration
-	MinimumDistanceMeters float64
+	Accuracy              provider.Accuracy `exhaustruct:"optional"`
+	DesiredAccuracyMeters uint32            `exhaustruct:"optional"`
+	MinimumInterval       time.Duration     `exhaustruct:"optional"`
+	MinimumDistanceMeters float64           `exhaustruct:"optional"`
 
-	DesktopID    string
-	Reconnect    bool
-	ReconnectMin time.Duration
-	ReconnectMax time.Duration
+	DesktopID    string        `exhaustruct:"optional"`
+	Reconnect    bool          `exhaustruct:"optional"`
+	ReconnectMin time.Duration `exhaustruct:"optional"`
+	ReconnectMax time.Duration `exhaustruct:"optional"`
 }
 
-type backend struct {
-	opts Options
+// Backend is the GeoClue provider.Provider. New builds one; the core drives it
+// through the Provider methods.
+type Backend struct {
+	opts Options `exhaustruct:"optional"`
 	sink provider.Sink
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	// Established by Start.
+	ctx    context.Context    `exhaustruct:"optional"`
+	cancel context.CancelFunc `exhaustruct:"optional"`
+	wg     sync.WaitGroup     `exhaustruct:"optional"`
 
-	mu         sync.Mutex
-	conn       *dbus.Conn
-	clientPath dbus.ObjectPath
+	mu         sync.Mutex      `exhaustruct:"optional"`
+	conn       *dbus.Conn      `exhaustruct:"optional"`
+	clientPath dbus.ObjectPath `exhaustruct:"optional"`
 }
 
 type session struct {
-	backend    *backend
+	backend    *Backend
 	conn       *dbus.Conn
 	clientPath dbus.ObjectPath
 	signals    chan *dbus.Signal
 }
 
-func New(opts Options, sink provider.Sink) (provider.Provider, error) {
-	return &backend{opts: opts, sink: sink}, nil
+// New prepares a Backend. It does not start the provider; Start does.
+func New(opts Options, sink provider.Sink) (*Backend, error) {
+	return &Backend{opts: opts, sink: sink}, nil
 }
 
-func (b *backend) Platform() string { return platform }
+var _ provider.Provider = (*Backend)(nil)
 
-func (b *backend) Capabilities() geo.Capabilities {
+// Platform names this adapter for error annotation.
+func (b *Backend) Platform() string { return platform }
+
+// Capabilities reports the optional Fix fields GeoClue can supply.
+func (b *Backend) Capabilities() geo.Capabilities {
 	return geo.Capabilities{
 		Altitude:         true,
 		VerticalAccuracy: false,
@@ -77,7 +86,9 @@ func (b *backend) Capabilities() geo.Capabilities {
 	}
 }
 
-func (b *backend) Start(startCtx context.Context) error {
+// Start brings the GeoClue session up and returns once it is delivering or has
+// failed. startCtx bounds start-up only; the session outlives it.
+func (b *Backend) Start(startCtx context.Context) error {
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 	ready := make(chan error, 1)
 	b.wg.Add(1)
@@ -93,7 +104,8 @@ func (b *backend) Start(startCtx context.Context) error {
 	}
 }
 
-func (b *backend) Stop() error {
+// Stop ends the session. It is idempotent and safe before or after Start.
+func (b *Backend) Stop() error {
 	if b.cancel != nil {
 		b.cancel()
 	}
@@ -108,7 +120,7 @@ func (b *backend) Stop() error {
 	return nil
 }
 
-func (b *backend) run(ready chan<- error) {
+func (b *Backend) run(ready chan<- error) {
 	defer b.wg.Done()
 
 	backoff := b.opts.ReconnectMin
@@ -197,7 +209,7 @@ func (b *backend) run(ready chan<- error) {
 	}
 }
 
-func (b *backend) connect(ctx context.Context) (*session, error) {
+func (b *Backend) connect(ctx context.Context) (*session, error) {
 	conn, err := dbus.SystemBusPrivate()
 	if err != nil {
 		return nil, geo.Wrap(

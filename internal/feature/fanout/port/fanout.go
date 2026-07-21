@@ -21,11 +21,13 @@ const (
 )
 
 // SubscriptionConfig configures one independent real-time subscription.
+// A zero Buffer or DropPolicy means "use the locator default", so every field
+// is optional.
 type SubscriptionConfig struct {
-	Buffer     int
-	DropPolicy DropPolicy
+	Buffer     int        `exhaustruct:"optional"`
+	DropPolicy DropPolicy `exhaustruct:"optional"`
 	// ReplayLatest immediately sends the most recent accepted fix, when present.
-	ReplayLatest bool
+	ReplayLatest bool `exhaustruct:"optional"`
 }
 
 // Subscription contains independent channels for fixes, native errors, and
@@ -36,25 +38,28 @@ type SubscriptionConfig struct {
 // being mapped into one: the shape of a subscription is a fan-out decision,
 // and a second near-identical struct elsewhere would only be able to drift.
 type Subscription struct {
-	Locations <-chan geo.Fix
-	Errors    <-chan error
-	Statuses  <-chan geo.Status
+	Locations <-chan geo.Fix    `exhaustruct:"optional"`
+	Errors    <-chan error      `exhaustruct:"optional"`
+	Statuses  <-chan geo.Status `exhaustruct:"optional"`
 }
 
 // Priming is what a new subscription receives before it sees any broadcast, so
 // a subscriber learns the current state without waiting for it to change.
+// Fix is meaningful only when HasFix is set, and a subscriber that arrives
+// before the first fix primes with neither, so every field is optional.
 type Priming struct {
-	Status geo.Status
-	Fix    geo.Fix
-	HasFix bool
+	Status geo.Status `exhaustruct:"optional"`
+	Fix    geo.Fix    `exhaustruct:"optional"`
+	HasFix bool       `exhaustruct:"optional"`
 }
 
 // Event is what a one-shot waiter receives: the first fix admitted after it
 // registered, or the first error broadcast in the meantime — whichever comes
 // first.
+// Exactly one field is set per event, so neither can be required.
 type Event struct {
-	Fix geo.Fix
-	Err error
+	Fix geo.Fix `exhaustruct:"optional"`
+	Err error   `exhaustruct:"optional"`
 }
 
 // Broadcaster is the subscriber registry. Every Broadcast call must be safe on
@@ -77,9 +82,9 @@ type Broadcaster interface {
 	// is what keeps a one-shot free of a supervising goroutine.
 	RemoveOnce(id uint64)
 
-	BroadcastFix(geo.Fix)
-	BroadcastError(error)
-	BroadcastStatus(geo.Status)
+	BroadcastFix(fix geo.Fix)
+	BroadcastError(err error)
+	BroadcastStatus(status geo.Status)
 
 	// Done closes when the Broadcaster closes. Per-subscription goroutines
 	// select on it so none of them outlive shutdown.

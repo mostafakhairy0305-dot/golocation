@@ -26,37 +26,46 @@ const platform = "windows"
 
 // Options are the WinRT-specific knobs. The core translates the public config
 // into this; nothing outside this package needs to know these names.
+// An unset knob means "leave the WinRT default alone".
 type Options struct {
-	Accuracy              provider.Accuracy
-	DesiredAccuracyMeters uint32
-	MinimumInterval       time.Duration
-	MaximumAge            time.Duration
-	StartTimeout          time.Duration
-	Permission            provider.PermissionMode
+	Accuracy              provider.Accuracy       `exhaustruct:"optional"`
+	DesiredAccuracyMeters uint32                  `exhaustruct:"optional"`
+	MinimumInterval       time.Duration           `exhaustruct:"optional"`
+	MaximumAge            time.Duration           `exhaustruct:"optional"`
+	StartTimeout          time.Duration           `exhaustruct:"optional"`
+	Permission            provider.PermissionMode `exhaustruct:"optional"`
 }
 
-type backend struct {
-	opts Options
+// Backend is the WinRT provider.Provider. New builds one; the core drives it
+// through the Provider methods.
+type Backend struct {
+	opts Options `exhaustruct:"optional"`
 	sink provider.Sink
 
-	mu sync.Mutex
+	mu sync.Mutex `exhaustruct:"optional"`
 
-	locator       *geolocation.Geolocator
-	positionToken syswinrt.EventRegistrationToken
-	statusToken   syswinrt.EventRegistrationToken
-	positionEvent *geolocation.TypedEventHandlerOfGeolocatorAndPositionChangedEventArgs
-	statusEvent   *geolocation.TypedEventHandlerOfGeolocatorAndStatusChangedEventArgs
+	// Owned by the Geolocator; populated on Start.
+	locator       *geolocation.Geolocator                                               `exhaustruct:"optional"`
+	positionToken syswinrt.EventRegistrationToken                                       `exhaustruct:"optional"`
+	statusToken   syswinrt.EventRegistrationToken                                       `exhaustruct:"optional"`
+	positionEvent *geolocation.TypedEventHandlerOfGeolocatorAndPositionChangedEventArgs `exhaustruct:"optional"`
+	statusEvent   *geolocation.TypedEventHandlerOfGeolocatorAndStatusChangedEventArgs   `exhaustruct:"optional"`
 
-	stopped bool
+	stopped bool `exhaustruct:"optional"`
 }
 
-func New(opts Options, sink provider.Sink) (provider.Provider, error) {
-	return &backend{opts: opts, sink: sink}, nil
+// New prepares a Backend. It does not start the provider; Start does.
+func New(opts Options, sink provider.Sink) (*Backend, error) {
+	return &Backend{opts: opts, sink: sink}, nil
 }
 
-func (b *backend) Platform() string { return platform }
+var _ provider.Provider = (*Backend)(nil)
 
-func (b *backend) Capabilities() geo.Capabilities {
+// Platform names this adapter for error annotation.
+func (b *Backend) Platform() string { return platform }
+
+// Capabilities reports the optional Fix fields the Windows Geolocator can supply.
+func (b *Backend) Capabilities() geo.Capabilities {
 	return geo.Capabilities{
 		Altitude:         true,
 		VerticalAccuracy: true,
@@ -66,7 +75,9 @@ func (b *backend) Capabilities() geo.Capabilities {
 	}
 }
 
-func (b *backend) Start(ctx context.Context) error {
+// Start brings the Geolocator up and returns once it is delivering or has
+// failed.
+func (b *Backend) Start(ctx context.Context) error {
 	if b.opts.Permission != provider.PermissionDoNotRequest {
 		b.sink.PublishStatus(
 			geo.Status{
@@ -201,7 +212,8 @@ func (b *backend) Start(ctx context.Context) error {
 	return nil
 }
 
-func (b *backend) Stop() error {
+// Stop ends the session. It is idempotent and safe before or after Start.
+func (b *Backend) Stop() error {
 	b.mu.Lock()
 	if b.stopped {
 		b.mu.Unlock()
@@ -239,7 +251,7 @@ func (b *backend) Stop() error {
 	return geo.Wrap(platform, "stop", stopErr, true)
 }
 
-func (b *backend) requestAccess(ctx context.Context) error {
+func (b *Backend) requestAccess(ctx context.Context) error {
 	statics, err := geolocation.GeolocatorStatics()
 	if err != nil {
 		return geo.Wrap(platform, "get Geolocator statics", err, false)
@@ -294,7 +306,7 @@ func (b *backend) requestAccess(ctx context.Context) error {
 	}
 }
 
-func (b *backend) startInitialRead(locator *geolocation.Geolocator) {
+func (b *Backend) startInitialRead(locator *geolocation.Geolocator) {
 	maximumAge := b.opts.MaximumAge
 	if maximumAge == 0 {
 		maximumAge = 24 * time.Hour
@@ -331,7 +343,7 @@ func (b *backend) startInitialRead(locator *geolocation.Geolocator) {
 	}()
 }
 
-func (b *backend) publishPosition(position *geolocation.IGeoposition) {
+func (b *Backend) publishPosition(position *geolocation.IGeoposition) {
 	coordinate, err := position.Coordinate()
 	if err != nil {
 		b.sink.PublishError(geo.Wrap(platform, "get coordinate", err, true))
@@ -412,7 +424,7 @@ func (b *backend) publishPosition(position *geolocation.IGeoposition) {
 	b.sink.PublishFix(fix)
 }
 
-func (b *backend) publishWindowsStatus(status geolocation.PositionStatus) {
+func (b *Backend) publishWindowsStatus(status geolocation.PositionStatus) {
 	permission := geo.PermissionGranted
 	switch status {
 	case geolocation.PositionStatusReady:

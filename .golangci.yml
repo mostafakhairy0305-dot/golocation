@@ -7,6 +7,19 @@ linters:
   disable: [wsl, gomodguard]
   enable: [gomodguard_v2]
   settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          allow:
+            - $gostd
+            - github.com/mostafakhairy0305-dot/golocation
+            # The only third-party dependency: the CoreLocation backend calls
+            # into Objective-C through it.
+            - github.com/ebitengine/purego
+          deny:
+            - pkg: math/rand
+              desc: use math/rand/v2
     ireturn:
       allow: [error, empty, anon, stdlib, generic]
     cyclop:

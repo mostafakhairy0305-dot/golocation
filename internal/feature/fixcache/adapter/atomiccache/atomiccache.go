@@ -13,11 +13,13 @@ import (
 // per stored fix, since fixes arrive about once a second while Last can be
 // called from every subscriber at once.
 type Cache struct {
-	latest atomic.Pointer[geo.Fix]
+	// The zero value holds no fix, which is the state New hands back.
+	latest atomic.Pointer[geo.Fix] `exhaustruct:"optional"`
 }
 
 var _ fixcache.Cache = (*Cache)(nil)
 
+// New builds an empty Cache, holding no fix until the first Store.
 func New() *Cache { return &Cache{} }
 
 // Store publishes fix as the newest value. It stores the address of the
@@ -25,6 +27,8 @@ func New() *Cache { return &Cache{} }
 // published pointer is immutable by construction.
 func (c *Cache) Store(fix geo.Fix) { c.latest.Store(&fix) }
 
+// Load returns the newest stored fix. The bool is false when nothing has been
+// stored yet, which is not the same as a zero fix.
 func (c *Cache) Load() (geo.Fix, bool) {
 	latest := c.latest.Load()
 	if latest == nil {

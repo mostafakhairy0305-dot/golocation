@@ -1,4 +1,4 @@
-package atomicstate
+package atomicstate_test
 
 import (
 	"testing"
@@ -6,16 +6,19 @@ import (
 
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	"github.com/mostafakhairy0305-dot/golocation/internal/feature/clock/adapter/fixedclock"
+	"github.com/mostafakhairy0305-dot/golocation/internal/feature/lifecycle/adapter/atomicstate"
 )
 
-func newTracker() *Tracker {
-	return New(
+func newTracker() *atomicstate.Tracker {
+	return atomicstate.New(
 		geo.Status{State: geo.StateStarting, Permission: geo.PermissionUnknown},
 		fixedclock.New(time.Now()),
 	)
 }
 
 func TestRestatingAStatusIsNotAChange(t *testing.T) {
+	t.Parallel()
+
 	tracker := newTracker()
 	status := geo.Status{State: geo.StateReady, Permission: geo.PermissionGranted, Message: "ready"}
 
@@ -30,6 +33,8 @@ func TestRestatingAStatusIsNotAChange(t *testing.T) {
 }
 
 func TestUnknownPermissionInheritsWhatWeAlreadyKnow(t *testing.T) {
+	t.Parallel()
+
 	tracker := newTracker()
 	if _, changed := tracker.Set(
 		geo.Status{State: geo.StateReady, Permission: geo.PermissionGranted},
@@ -45,8 +50,10 @@ func TestUnknownPermissionInheritsWhatWeAlreadyKnow(t *testing.T) {
 }
 
 func TestMarkReadySettlesThePermissionQuestion(t *testing.T) {
+	t.Parallel()
+
 	for _, before := range []geo.PermissionState{geo.PermissionUnknown, geo.PermissionPromptRequired} {
-		tracker := New(
+		tracker := atomicstate.New(
 			geo.Status{State: geo.StateStarting, Permission: before},
 			fixedclock.New(time.Now()),
 		)
@@ -70,7 +77,9 @@ func TestMarkReadySettlesThePermissionQuestion(t *testing.T) {
 }
 
 func TestMarkReadyLeavesADeniedPermissionAlone(t *testing.T) {
-	tracker := New(
+	t.Parallel()
+
+	tracker := atomicstate.New(
 		geo.Status{State: geo.StateDisabled, Permission: geo.PermissionRestricted},
 		fixedclock.New(time.Now()),
 	)
@@ -82,6 +91,8 @@ func TestMarkReadyLeavesADeniedPermissionAlone(t *testing.T) {
 }
 
 func TestMarkReadyTwiceReportsOneChange(t *testing.T) {
+	t.Parallel()
+
 	tracker := newTracker()
 	if _, changed := tracker.MarkReady("receiving locations"); !changed {
 		t.Fatal("the first MarkReady reported no change")
@@ -93,6 +104,8 @@ func TestMarkReadyTwiceReportsOneChange(t *testing.T) {
 }
 
 func TestStateMatchesTheRecordedStatus(t *testing.T) {
+	t.Parallel()
+
 	tracker := newTracker()
 	if tracker.State() != geo.StateStarting {
 		t.Fatalf("initial state = %v, want StateStarting", tracker.State())
@@ -106,7 +119,9 @@ func TestStateMatchesTheRecordedStatus(t *testing.T) {
 }
 
 func TestNewStampsAnUnsetTime(t *testing.T) {
-	if got := New(
+	t.Parallel()
+
+	if got := atomicstate.New(
 		geo.Status{State: geo.StateStarting},
 		fixedclock.New(time.Now()),
 	).Get().

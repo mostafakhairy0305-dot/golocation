@@ -1,16 +1,21 @@
-package geo
+package geo_test
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
+
+	"github.com/mostafakhairy0305-dot/golocation/geo"
 )
 
 // Validate folds the NaN, infinity, and range checks into one negated range
 // test. That is only correct because NaN compares false against everything, so
 // the rejection cases are worth pinning down.
 func TestValidateRejectsEveryUnusableCoordinate(t *testing.T) {
-	cases := map[string]Fix{
+	t.Parallel()
+
+	cases := map[string]geo.Fix{
 		"NaN latitude":        {Latitude: math.NaN()},
 		"NaN longitude":       {Longitude: math.NaN()},
 		"NaN accuracy":        {AccuracyMeters: math.NaN()},
@@ -28,16 +33,20 @@ func TestValidateRejectsEveryUnusableCoordinate(t *testing.T) {
 	}
 	for name, fix := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := Validate(fix)
-			if err == nil {
-				t.Fatalf("Validate(%+v) = nil, want an error", fix)
+			t.Parallel()
+
+			err := geo.Validate(fix)
+			if !errors.Is(err, geo.ErrInvalidFix) {
+				t.Fatalf("Validate(%+v) = %v, want ErrInvalidFix", fix, err)
 			}
 		})
 	}
 }
 
 func TestValidateAcceptsCoordinatesOnTheBoundary(t *testing.T) {
-	cases := map[string]Fix{
+	t.Parallel()
+
+	cases := map[string]geo.Fix{
 		"null island":              {},
 		"north pole":               {Latitude: 90, Longitude: 0},
 		"south pole":               {Latitude: -90, Longitude: 0},
@@ -48,7 +57,9 @@ func TestValidateAcceptsCoordinatesOnTheBoundary(t *testing.T) {
 	}
 	for name, fix := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := Validate(fix)
+			t.Parallel()
+
+			err := geo.Validate(fix)
 			if err != nil {
 				t.Fatalf("Validate(%+v) = %v, want nil", fix, err)
 			}
@@ -57,14 +68,16 @@ func TestValidateAcceptsCoordinatesOnTheBoundary(t *testing.T) {
 }
 
 func TestDistanceIsSymmetricAndZeroForAPoint(t *testing.T) {
-	london := Fix{Latitude: 51.5074, Longitude: -0.1278}
-	paris := Fix{Latitude: 48.8566, Longitude: 2.3522}
+	t.Parallel()
 
-	if got := Distance(london, london); got != 0 {
+	london := geo.Fix{Latitude: 51.5074, Longitude: -0.1278}
+	paris := geo.Fix{Latitude: 48.8566, Longitude: 2.3522}
+
+	if got := geo.Distance(london, london); got != 0 {
 		t.Fatalf("Distance to itself = %v, want 0", got)
 	}
 
-	there, back := Distance(london, paris), Distance(paris, london)
+	there, back := geo.Distance(london, paris), geo.Distance(paris, london)
 	if math.Abs(there-back) > 1e-6 {
 		t.Fatalf("Distance is not symmetric: %v vs %v", there, back)
 	}
@@ -76,15 +89,19 @@ func TestDistanceIsSymmetricAndZeroForAPoint(t *testing.T) {
 }
 
 func TestDistanceAcrossTheAntimeridianIsShort(t *testing.T) {
-	west := Fix{Latitude: 0, Longitude: 179.999}
+	t.Parallel()
 
-	east := Fix{Latitude: 0, Longitude: -179.999}
-	if got := Distance(west, east); got > 1000 {
+	west := geo.Fix{Latitude: 0, Longitude: 179.999}
+
+	east := geo.Fix{Latitude: 0, Longitude: -179.999}
+	if got := geo.Distance(west, east); got > 1000 {
 		t.Fatalf("Distance = %v m, want a short hop across the antimeridian", got)
 	}
 }
 
 func TestIsFresh(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 
 	cases := map[string]struct {
@@ -96,25 +113,28 @@ func TestIsFresh(t *testing.T) {
 		"beyond max age":           {now.Add(-2 * time.Minute), time.Minute, false},
 		"exactly at max age":       {now.Add(-time.Minute), time.Minute, true},
 		"zero max age disables it": {now.Add(-100 * time.Hour), 0, true},
-		"ahead within clock skew":  {now.Add(MaxClockSkew / 2), time.Minute, true},
-		"ahead beyond clock skew":  {now.Add(2 * MaxClockSkew), time.Minute, false},
+		"ahead within clock skew":  {now.Add(geo.MaxClockSkew / 2), time.Minute, true},
+		"ahead beyond clock skew":  {now.Add(2 * geo.MaxClockSkew), time.Minute, false},
 	}
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := IsFresh(Fix{Timestamp: tc.timestamp}, tc.maxAge, now); got != tc.want {
-				t.Fatalf("IsFresh = %v, want %v", got, tc.want)
+			t.Parallel()
+
+			fix := geo.Fix{Timestamp: testCase.timestamp}
+			if got := geo.IsFresh(fix, testCase.maxAge, now); got != testCase.want {
+				t.Fatalf("IsFresh = %v, want %v", got, testCase.want)
 			}
 		})
 	}
 }
 
 func BenchmarkValidate(b *testing.B) {
-	fix := Fix{Latitude: 51.5074, Longitude: -0.1278, AccuracyMeters: 12.5}
+	fix := geo.Fix{Latitude: 51.5074, Longitude: -0.1278, AccuracyMeters: 12.5}
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		err := Validate(fix)
+		err := geo.Validate(fix)
 		if err != nil {
 			b.Fatalf("Validate: %v", err)
 		}
@@ -122,12 +142,12 @@ func BenchmarkValidate(b *testing.B) {
 }
 
 func BenchmarkDistance(b *testing.B) {
-	london := Fix{Latitude: 51.5074, Longitude: -0.1278}
-	paris := Fix{Latitude: 48.8566, Longitude: 2.3522}
+	london := geo.Fix{Latitude: 51.5074, Longitude: -0.1278}
+	paris := geo.Fix{Latitude: 48.8566, Longitude: 2.3522}
 
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_ = Distance(london, paris)
+		_ = geo.Distance(london, paris)
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"fmt"
 )
 
+// The sentinel errors every layer reports through. A caller matches them with
+// errors.Is; the concrete value is usually an *Error carrying the operation and
+// the platform that raised it.
 var (
 	ErrInvalidConfig    = errors.New("invalid location configuration")
 	ErrPermissionDenied = errors.New("location permission denied")
@@ -17,13 +20,19 @@ var (
 	ErrStaleFix            = errors.New("stale location fix")
 	ErrClosed              = errors.New("locator closed")
 	ErrUnsupported         = errors.New("platform or architecture unsupported")
+	// ErrInvalidFix reports coordinates a provider cannot have meant: out of
+	// range, NaN, or infinite. It is the sentinel behind every Validate
+	// failure, so a caller can match the cause instead of the message.
+	ErrInvalidFix = errors.New("invalid location fix")
 )
 
 // Error adds operation, platform, and retry metadata while preserving errors.Is.
 type Error struct {
-	Op        string
-	Platform  string
-	Temporary bool
+	Op string
+	// Platform is empty for errors raised above the adapter layer, and a
+	// non-retryable error is the common case, so both are optional.
+	Platform  string `exhaustruct:"optional"`
+	Temporary bool   `exhaustruct:"optional"`
 	Err       error
 }
 

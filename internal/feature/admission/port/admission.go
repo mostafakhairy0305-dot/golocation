@@ -17,9 +17,9 @@ import (
 // Rules are the admission thresholds. A zero value disables the corresponding
 // check.
 type Rules struct {
-	MinimumInterval       time.Duration
-	MinimumDistanceMeters float64
-	MaximumAge            time.Duration
+	MinimumInterval       time.Duration `exhaustruct:"optional"`
+	MinimumDistanceMeters float64       `exhaustruct:"optional"`
+	MaximumAge            time.Duration `exhaustruct:"optional"`
 }
 
 // Gate decides which provider samples reach subscribers. Implementations must

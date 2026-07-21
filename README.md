@@ -5,7 +5,8 @@ system: **CoreLocation** on macOS, **GeoClue2** on Linux, and **Windows.Devices.
 on Windows.
 
 No cgo, no daemon, no polling loop of your own. `Open` starts the provider and returns a
-`Locator`; you read fixes as a cached value, as a one-shot wait, or as a stream.
+`*Session`, which implements `Locator`; you read fixes as a cached value, as a one-shot
+wait, or as a stream.
 
 MIT licensed · Go 1.25+
 
@@ -169,12 +170,13 @@ the domain values and is re-exported here, so importing `location` alone is enou
 
 | Symbol | Signature | Notes |
 |---|---|---|
-| `Open` | `func(ctx context.Context, config Config) (Locator, error)` | Starts the native provider. Blocks until it starts or `Config.StartTimeout` elapses. |
+| `Open` | `func(ctx context.Context, config Config) (*Session, error)` | Starts the native provider. Blocks until it starts or `Config.StartTimeout` elapses. |
 | `DefaultConfig` | `func() Config` | Production-oriented defaults; see the [Config](#config) table. |
 
 ### Locator
 
-The single interface callers hold. Identical on all three platforms.
+The interface every locator satisfies, and what `*Session` — the concrete type `Open`
+returns — implements. Identical on all three platforms.
 
 | Method | Blocks? | Behaviour |
 |---|---|---|
@@ -447,9 +449,9 @@ internal/feature/<name>/adapter/*/  one package per implementation
 | `provider` | The native location source | `corelocation`, `geoclue`, `winrt`, `unsupported` |
 
 The operating system is an adapter like any other: it implements `provider.Provider`, and
-`provider.Factory` chooses between implementations. `internal/feature/provider/platform`
-supplies the factory bound at build time — the only build-tagged code outside the adapters
-themselves.
+`provider.Factory` chooses between implementations and attaches the one it built to a
+`provider.Host`. `internal/feature/provider/platform` supplies the factory bound at build
+time — the only build-tagged code outside the adapters themselves.
 
 Run `go doc github.com/mostafakhairy0305-dot/golocation` for the full design notes.
 

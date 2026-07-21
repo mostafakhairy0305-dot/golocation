@@ -82,7 +82,8 @@ func BenchmarkPublishFix(b *testing.B) {
 
 	ctx := b.Context()
 
-	if _, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 1}); err != nil {
+	_, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 1})
+	if err != nil {
 		b.Fatalf("Subscribe: %v", err)
 	}
 

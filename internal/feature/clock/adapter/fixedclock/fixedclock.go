@@ -17,14 +17,16 @@ import (
 // because the code under test may read it from a background goroutine while
 // the test advances it.
 type Clock struct {
-	mu  sync.RWMutex
+	mu  sync.RWMutex `exhaustruct:"optional"`
 	now time.Time
 }
 
 var _ clock.Clock = (*Clock)(nil)
 
+// New builds a Clock stopped at now, normalised to UTC.
 func New(now time.Time) *Clock { return &Clock{now: now.UTC()} }
 
+// Now returns the time the clock was last set to.
 func (c *Clock) Now() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -12,19 +12,31 @@ import (
 // re-exported here so callers still need only this one package, and so that
 // moving a concept between features never breaks the public API.
 //
-// The ones aliasing an internal package carry their own documentation, because
-// godoc cannot follow an alias into internal/ to find it.
+// Every name carries a summary here, because godoc cannot follow an alias into
+// internal/ to find the original. The ones aliasing geo point at it for the
+// documentation in full.
 
-// Domain values, documented in full on package geo.
+// Domain values, owned by package geo.
 type (
-	Fix             = geo.Fix
-	Field           = geo.Field
-	Source          = geo.Source
-	State           = geo.State
+	// Fix is one location sample. See [geo.Fix].
+	Fix = geo.Fix
+	// Field reports which optional Fix fields carry data. See [geo.Field].
+	Field = geo.Field
+	// Source is the provider category behind a Fix. See [geo.Source].
+	Source = geo.Source
+	// State is the native location service state. See [geo.State].
+	State = geo.State
+	// PermissionState is the current location permission.
+	// See [geo.PermissionState].
 	PermissionState = geo.PermissionState
-	Status          = geo.Status
-	Capabilities    = geo.Capabilities
-	Error           = geo.Error
+	// Status is a snapshot of service and permission state. See [geo.Status].
+	Status = geo.Status
+	// Capabilities reports the fields the active backend can supply.
+	// See [geo.Capabilities].
+	Capabilities = geo.Capabilities
+	// Error carries the operation, platform, and retry hint behind a failure.
+	// See [geo.Error].
+	Error = geo.Error
 )
 
 // Subscription contains independent channels for fixes, native errors, and

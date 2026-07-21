@@ -1,4 +1,4 @@
-package rules
+package rules_test
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mostafakhairy0305-dot/golocation/geo"
+	"github.com/mostafakhairy0305-dot/golocation/internal/feature/admission/adapter/rules"
 	admission "github.com/mostafakhairy0305-dot/golocation/internal/feature/admission/port"
 )
 
@@ -14,7 +15,9 @@ func fixAt(at time.Time, lat, lon float64) geo.Fix {
 }
 
 func TestFirstValidFixIsAdmitted(t *testing.T) {
-	gate := New(admission.Rules{MinimumInterval: time.Minute, MinimumDistanceMeters: 1000})
+	t.Parallel()
+
+	gate := rules.New(admission.Rules{MinimumInterval: time.Minute, MinimumDistanceMeters: 1000})
 	now := time.Now()
 
 	// The thresholds compare against a previous fix, and there is none yet.
@@ -25,6 +28,8 @@ func TestFirstValidFixIsAdmitted(t *testing.T) {
 }
 
 func TestRedundantFixesAreSkippedWithoutAnError(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]struct {
 		rules  admission.Rules
 		second func(base time.Time) geo.Fix
@@ -39,16 +44,20 @@ func TestRedundantFixesAreSkippedWithoutAnError(t *testing.T) {
 		},
 	}
 
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			gate := New(tc.rules)
+			t.Parallel()
+
+			gate := rules.New(testCase.rules)
 
 			now := time.Now()
-			if _, err := gate.Admit(fixAt(now, 10, 10), now); err != nil {
+
+			_, err := gate.Admit(fixAt(now, 10, 10), now)
+			if err != nil {
 				t.Fatalf("first Admit: %v", err)
 			}
 
-			second := tc.second(now)
+			second := testCase.second(now)
 
 			admitted, err := gate.Admit(second, second.ReceivedAt)
 			if err != nil {
@@ -63,10 +72,14 @@ func TestRedundantFixesAreSkippedWithoutAnError(t *testing.T) {
 }
 
 func TestThresholdsAdmitOnceTheyAreCleared(t *testing.T) {
-	gate := New(admission.Rules{MinimumInterval: time.Minute, MinimumDistanceMeters: 100})
+	t.Parallel()
+
+	gate := rules.New(admission.Rules{MinimumInterval: time.Minute, MinimumDistanceMeters: 100})
 
 	now := time.Now()
-	if _, err := gate.Admit(fixAt(now, 10, 10), now); err != nil {
+
+	_, err := gate.Admit(fixAt(now, 10, 10), now)
+	if err != nil {
 		t.Fatalf("first Admit: %v", err)
 	}
 
@@ -83,6 +96,8 @@ func TestThresholdsAdmitOnceTheyAreCleared(t *testing.T) {
 }
 
 func TestUnusableFixesAreRejectedWithTheCause(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	cases := map[string]struct {
 		rules admission.Rules
@@ -103,30 +118,43 @@ func TestUnusableFixesAreRejectedWithTheCause(t *testing.T) {
 		},
 	}
 
-	for name, tc := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			gate := New(tc.rules)
+			t.Parallel()
 
-			admitted, err := gate.Admit(tc.fix, now)
-			if admitted {
-				t.Fatal("an unusable fix was admitted")
-			}
+			gate := rules.New(testCase.rules)
 
-			if err == nil {
-				t.Fatal("an unusable fix was skipped silently instead of reported")
-			}
-
-			if tc.want != nil && !errors.Is(err, tc.want) {
-				t.Fatalf("error = %v, want %v", err, tc.want)
-			}
+			admitted, err := gate.Admit(testCase.fix, now)
+			expectRejected(t, admitted, err, testCase.want)
 		})
+	}
+}
+
+// expectRejected fails unless the gate declined the fix and named a cause. The
+// want is optional: some rejections have no sentinel worth pinning, but every
+// one of them still has to report something.
+func expectRejected(t *testing.T, admitted bool, err, want error) {
+	t.Helper()
+
+	if admitted {
+		t.Fatal("an unusable fix was admitted")
+	}
+
+	if err == nil {
+		t.Fatal("an unusable fix was skipped silently instead of reported")
+	}
+
+	if want != nil && !errors.Is(err, want) {
+		t.Fatalf("error = %v, want %v", err, want)
 	}
 }
 
 // The gate reports the cause and nothing else; annotating it with the platform
 // belongs to the caller, which is the only layer that knows which adapter ran.
 func TestRejectionCarriesNoPlatformAnnotation(t *testing.T) {
-	gate := New(admission.Rules{MaximumAge: time.Minute})
+	t.Parallel()
+
+	gate := rules.New(admission.Rules{MaximumAge: time.Minute})
 	now := time.Now()
 
 	_, err := gate.Admit(fixAt(now.Add(-time.Hour), 1, 1), now)
@@ -138,7 +166,9 @@ func TestRejectionCarriesNoPlatformAnnotation(t *testing.T) {
 }
 
 func TestAFutureFixWithinClockSkewStaysFresh(t *testing.T) {
-	gate := New(admission.Rules{MaximumAge: time.Minute})
+	t.Parallel()
+
+	gate := rules.New(admission.Rules{MaximumAge: time.Minute})
 	now := time.Now()
 
 	admitted, err := gate.Admit(fixAt(now.Add(geo.MaxClockSkew/2), 1, 1), now)
@@ -152,10 +182,12 @@ func TestAFutureFixWithinClockSkewStaysFresh(t *testing.T) {
 }
 
 func BenchmarkAdmitWithDistanceFilter(b *testing.B) {
-	gate := New(admission.Rules{MinimumDistanceMeters: 1})
+	gate := rules.New(admission.Rules{MinimumDistanceMeters: 1})
 
 	now := time.Now()
-	if _, err := gate.Admit(fixAt(now, 51.5074, -0.1278), now); err != nil {
+
+	_, err := gate.Admit(fixAt(now, 51.5074, -0.1278), now)
+	if err != nil {
 		b.Fatalf("seed Admit: %v", err)
 	}
 
@@ -164,7 +196,8 @@ func BenchmarkAdmitWithDistanceFilter(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := gate.Admit(fix, now); err != nil {
+		_, err = gate.Admit(fix, now)
+		if err != nil {
 			b.Fatalf("Admit: %v", err)
 		}
 	}

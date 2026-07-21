@@ -23,17 +23,18 @@ type subscriber struct {
 // a waiter the moment its single Next returns — and a broadcast walks both
 // without caring which is which.
 type Hub struct {
-	mu      sync.RWMutex
+	mu      sync.RWMutex `exhaustruct:"optional"`
 	subs    map[uint64]*subscriber
 	waiters map[uint64]chan fanout.Event
-	closed  bool
+	closed  bool `exhaustruct:"optional"`
 
-	nextID atomic.Uint64
+	nextID atomic.Uint64 `exhaustruct:"optional"`
 	done   chan struct{}
 }
 
 var _ fanout.Broadcaster = (*Hub)(nil)
 
+// New builds an empty Hub, ready for registrations.
 func New() *Hub {
 	return &Hub{
 		subs:    make(map[uint64]*subscriber),
@@ -42,8 +43,14 @@ func New() *Hub {
 	}
 }
 
+// Done returns a channel closed when the Hub closes, so a subscription's
+// watcher can tell shutdown apart from its own context ending.
 func (h *Hub) Done() <-chan struct{} { return h.done }
 
+// Add registers a subscription and returns its id alongside the three channels
+// the caller reads. It primes the new channels with the current status, and
+// with the latest fix when the config asks for it. It fails with geo.ErrClosed
+// once the Hub has closed.
 func (h *Hub) Add(
 	cfg fanout.SubscriptionConfig,
 	priming fanout.Priming,
@@ -83,6 +90,9 @@ func (h *Hub) Add(
 	}, nil
 }
 
+// Remove unregisters a subscription and closes its channels. An id that is not
+// registered — because the subscription is gone, or the Hub closed it — is a
+// no-op, so it is safe to call more than once.
 func (h *Hub) Remove(id uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -93,6 +103,9 @@ func (h *Hub) Remove(id uint64) {
 	}
 }
 
+// AddOnce registers a one-shot waiter for the next fix or error, and returns
+// its id alongside the channel that event arrives on. The caller unregisters
+// through RemoveOnce. It fails with geo.ErrClosed once the Hub has closed.
 func (h *Hub) AddOnce() (uint64, <-chan fanout.Event, error) {
 	// Buffer one, so a broadcast can deposit the event and move on whether or
 	// not the waiter has reached its receive yet.
@@ -123,16 +136,18 @@ func (h *Hub) RemoveOnce(id uint64) {
 	delete(h.waiters, id)
 }
 
-// Counts reports how many subscriptions and waiters are registered. It is not
-// part of fanout.Broadcaster: nothing in the application needs it, but a
-// leaked registration is invisible from the outside and worth asserting on.
-func (h *Hub) Counts() (subscriptions, waiters int) {
+// Counts reports how many subscriptions and how many waiters are registered,
+// in that order. It is not part of fanout.Broadcaster: nothing in the
+// application needs it, but a leaked registration is invisible from the
+// outside and worth asserting on.
+func (h *Hub) Counts() (int, int) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	return len(h.subs), len(h.waiters)
 }
 
+// BroadcastFix delivers fix to every subscription and wakes every waiter.
 func (h *Hub) BroadcastFix(fix geo.Fix) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -162,6 +177,8 @@ func (h *Hub) BroadcastError(err error) {
 	}
 }
 
+// BroadcastStatus delivers status to every subscription. Waiters are left
+// alone: a status change is not the fix they are blocked on.
 func (h *Hub) BroadcastStatus(status geo.Status) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -171,6 +188,8 @@ func (h *Hub) BroadcastStatus(status geo.Status) {
 	}
 }
 
+// Close unregisters everything, closes every channel it handed out, and
+// rejects later registrations. It is idempotent.
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -201,11 +220,9 @@ func (s *subscriber) close() {
 
 // offer delivers value without ever blocking the caller, because the caller
 // may be an operating system callback thread that must return promptly.
-func offer[T any](ch chan T, value T, policy fanout.DropPolicy) {
-	select {
-	case ch <- value:
+func offer[T any](target chan T, value T, policy fanout.DropPolicy) {
+	if trySend(target, value) {
 		return
-	default:
 	}
 
 	if policy == fanout.DropNewest {
@@ -216,13 +233,20 @@ func offer[T any](ch chan T, value T, policy fanout.DropPolicy) {
 	// between, and either outcome is acceptable — one value is lost either
 	// way, which is exactly what a drop policy is for.
 	select {
-	case <-ch:
+	case <-target:
 	default:
 	}
 
+	_ = trySend(target, value)
+}
+
+// trySend reports whether value fit in the channel without blocking.
+func trySend[T any](target chan T, value T) bool {
 	select {
-	case ch <- value:
+	case target <- value:
+		return true
 	default:
+		return false
 	}
 }
 

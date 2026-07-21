@@ -24,15 +24,18 @@ import (
 // struct copy. It is written under the same lock, so it never disagrees with
 // the Status it was taken from.
 type Tracker struct {
-	clock  clock.Clock
-	state  atomic.Uint32
-	status atomic.Pointer[geo.Status]
+	clock clock.Clock
+	// New stores through these rather than initializing them in the literal.
+	state  atomic.Uint32              `exhaustruct:"optional"`
+	status atomic.Pointer[geo.Status] `exhaustruct:"optional"`
 
-	mu sync.Mutex
+	mu sync.Mutex `exhaustruct:"optional"`
 }
 
 var _ lifecycle.Tracker = (*Tracker)(nil)
 
+// New builds a Tracker holding initial, stamping it from clock when it carries
+// no time of its own.
 func New(initial geo.Status, clock clock.Clock) *Tracker {
 	if initial.UpdatedAt.IsZero() {
 		initial.UpdatedAt = clock.Now()
@@ -45,13 +48,20 @@ func New(initial geo.Status, clock clock.Clock) *Tracker {
 	return tracker
 }
 
+// stateMask is geo.State's width in the word State stores it in.
+const stateMask = 0xFF
+
 // State narrows the stored word back to geo.State's uint8. Every write goes
 // through store, which only ever widens a geo.State, so the mask discards
 // nothing — it just says so in a form the compiler and the linters can see.
-func (t *Tracker) State() geo.State { return geo.State(t.state.Load() & 0xFF) }
+func (t *Tracker) State() geo.State { return geo.State(t.state.Load() & stateMask) }
 
+// Get returns the current status.
 func (t *Tracker) Get() geo.Status { return *t.status.Load() }
 
+// Set records status and returns what was stored alongside whether it says
+// anything new. An unset time is stamped from the clock, and an unknown
+// permission inherits whatever the platform last reported.
 func (t *Tracker) Set(status geo.Status) (geo.Status, bool) {
 	if status.UpdatedAt.IsZero() {
 		status.UpdatedAt = t.clock.Now()
@@ -69,6 +79,9 @@ func (t *Tracker) Set(status geo.Status) (geo.Status, bool) {
 	return t.store(status)
 }
 
+// MarkReady moves the tracker to geo.StateReady with message, and returns the
+// stored status alongside whether it says anything new. Reaching ready proves
+// access was granted, so an as-yet-unknown permission is resolved here.
 func (t *Tracker) MarkReady(message string) (geo.Status, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -78,9 +91,13 @@ func (t *Tracker) MarkReady(message string) (geo.Status, bool) {
 	next.Message = message
 
 	next.UpdatedAt = t.clock.Now()
+	// Readiness proves the platform let us through, so a permission we never
+	// learned is now known to be granted. One the platform already decided —
+	// granted, denied, restricted — is left exactly as reported.
 	switch next.Permission {
 	case geo.PermissionUnknown, geo.PermissionPromptRequired:
 		next.Permission = geo.PermissionGranted
+	case geo.PermissionGranted, geo.PermissionDenied, geo.PermissionRestricted:
 	}
 
 	return t.store(next)

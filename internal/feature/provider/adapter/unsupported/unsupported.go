@@ -5,12 +5,11 @@ package unsupported
 
 import (
 	"github.com/mostafakhairy0305-dot/golocation/geo"
-	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
 
-// New reports that the platform has no location provider. It never returns a
-// Provider: there is nothing to start, so the failure belongs at Open rather
-// than at the first call.
-func New(platform string) (provider.Provider, error) {
-	return nil, geo.Wrap(platform, "open", geo.ErrUnsupported, false)
+// New reports that the platform has no location provider. It returns nothing
+// but the refusal: there is no provider to attach and nothing to start, so the
+// failure belongs at Open rather than at the first call.
+func New(platform string) error {
+	return geo.Wrap(platform, "open", geo.ErrUnsupported, false)
 }

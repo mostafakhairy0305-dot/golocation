@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,12 +19,19 @@ import (
 // the Service a platform name and capabilities; it never produces fixes of its
 // own, because a test drives the Sink directly.
 type fakeProvider struct {
-	stopped  int
-	stopErr  error
+	stopped  int   `exhaustruct:"optional"`
+	started  int   `exhaustruct:"optional"`
+	stopErr  error `exhaustruct:"optional"`
+	startErr error `exhaustruct:"optional"`
 	platform string
 }
 
-func (p *fakeProvider) Start(context.Context) error { return nil }
+func (p *fakeProvider) Start(context.Context) error {
+	p.started++
+
+	return p.startErr
+}
+
 func (p *fakeProvider) Stop() error {
 	p.stopped++
 
@@ -41,14 +49,15 @@ var _ provider.Provider = (*fakeProvider)(nil)
 // before it ever reaches the hub, so the registration-failed branches are
 // unreachable through the real adapter.
 type stubHub struct {
-	addErr     error
-	addOnceErr error
+	addErr     error `exhaustruct:"optional"`
+	addOnceErr error `exhaustruct:"optional"`
 	done       chan struct{}
 
-	mu       sync.Mutex
-	fixes    []geo.Fix
-	errs     []error
-	statuses []geo.Status
+	// Only errors are recorded: the drop-before-broadcast rules are the whole
+	// reason this stub exists, and fixes and statuses have a real hub to be
+	// observed through.
+	mu   sync.Mutex `exhaustruct:"optional"`
+	errs []error    `exhaustruct:"optional"`
 }
 
 func newStubHub() *stubHub { return &stubHub{done: make(chan struct{})} }
@@ -73,12 +82,8 @@ func (h *stubHub) AddOnce() (uint64, <-chan fanout.Event, error) {
 }
 func (h *stubHub) RemoveOnce(uint64) {}
 
-func (h *stubHub) BroadcastFix(fix geo.Fix) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.fixes = append(h.fixes, fix)
-}
+func (h *stubHub) BroadcastFix(geo.Fix)       {}
+func (h *stubHub) BroadcastStatus(geo.Status) {}
 
 func (h *stubHub) BroadcastError(err error) {
 	h.mu.Lock()
@@ -87,39 +92,59 @@ func (h *stubHub) BroadcastError(err error) {
 	h.errs = append(h.errs, err)
 }
 
-func (h *stubHub) BroadcastStatus(status geo.Status) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	h.statuses = append(h.statuses, status)
-}
-
 func (h *stubHub) Done() <-chan struct{} { return h.done }
 func (h *stubHub) Close()                { close(h.done) }
 
-func (h *stubHub) counts() (fixes, errs, statuses int) {
+// errorCount reports how many errors were broadcast.
+func (h *stubHub) errorCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	return len(h.fixes), len(h.errs), len(h.statuses)
+	return len(h.errs)
 }
 
 var _ fanout.Broadcaster = (*stubHub)(nil)
 
-var epoch = time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
+// testConfig holds the fixed values this package's tests share. A function
+// returns it rather than a package-level variable holding it, so the package
+// carries no global state; the value is constant, so every call is equal.
+type testConfig struct {
+	epoch time.Time
+}
+
+func config() *testConfig {
+	return &testConfig{epoch: time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)}
+}
+
+// testPlatform is the platform name the fake provider reports, and what an
+// annotated error is expected to carry through.
+const testPlatform = "test"
+
+// Failures the fakes are told to return. They are values rather than literals
+// so a test can assert the exact error travelled through, not just that some
+// error did.
+var (
+	errProviderExploded = errors.New("provider exploded")
+	errStopFailed       = errors.New("stop failed")
+	errStartFailed      = errors.New("start failed")
+	errHubRefusedWaiter = errors.New("hub refused the waiter")
+	errHubRefusedSub    = errors.New("hub refused the subscription")
+	errLateFailure      = errors.New("late failure")
+)
 
 // The service runs on a clock the test drives, so anything depending on
 // elapsed time is decided by advancing it rather than by sleeping.
 func newTestService(t *testing.T) (*Service, *fakeProvider, *fixedclock.Clock) {
 	t.Helper()
 
+	epoch := config().epoch
 	stopped := fixedclock.New(epoch)
 	service := New(Options{
 		MaximumAge:           time.Minute,
 		DefaultChannelBuffer: 4,
 		DefaultDropPolicy:    fanout.DropOldest,
 	}, Features{Clock: stopped})
-	native := &fakeProvider{platform: "test"}
+	native := &fakeProvider{platform: testPlatform}
 	service.Attach(native)
 	t.Cleanup(func() { _ = service.Close() })
 
@@ -136,16 +161,26 @@ func sampleFixAt(now time.Time, lat, lon float64) geo.Fix {
 	}
 }
 
-// awaitWaiter blocks until a one-shot waiter is registered, so a test can
-// publish exactly once and know the waiter will see it. Polling the registry
-// beats sleeping and hoping the goroutine got there.
-func awaitWaiter(t *testing.T, service *Service) {
+// testHub returns the default hub. The registration assertions below have to
+// see inside it, and the field is typed as the port.
+func testHub(t *testing.T, service *Service) *chanhub.Hub {
 	t.Helper()
 
 	hub, ok := service.hub.(*chanhub.Hub)
 	if !ok {
 		t.Fatalf("default hub is %T, want *chanhub.Hub", service.hub)
 	}
+
+	return hub
+}
+
+// awaitWaiter blocks until a one-shot waiter is registered, so a test can
+// publish exactly once and know the waiter will see it. Polling the registry
+// beats sleeping and hoping the goroutine got there.
+func awaitWaiter(t *testing.T, service *Service) {
+	t.Helper()
+
+	hub := testHub(t, service)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -159,7 +194,188 @@ func awaitWaiter(t *testing.T, service *Service) {
 	t.Fatal("no waiter registered")
 }
 
+// awaitNoSubscriptions blocks until the hub has let go of every subscription.
+func awaitNoSubscriptions(t *testing.T, service *Service) {
+	t.Helper()
+
+	hub := testHub(t, service)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if subscriptions, _ := hub.Counts(); subscriptions == 0 {
+			return
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	t.Fatal("the subscription stayed registered after its context ended")
+}
+
+// subscribe registers a subscription the Service is expected to accept, scoped
+// to the test's own context. A refusal is never the thing under test here — the
+// two tests that do exercise one call Subscribe directly.
+func subscribe(
+	t *testing.T,
+	service *Service,
+	cfg fanout.SubscriptionConfig,
+) fanout.Subscription {
+	t.Helper()
+
+	sub, err := service.Subscribe(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	return sub
+}
+
+// closeService closes the Service, failing the test if teardown reports one.
+func closeService(t *testing.T, what string, service *Service) {
+	t.Helper()
+
+	err := service.Close()
+	if err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+}
+
+// expectClosedErr fails unless err reports a closed Service.
+func expectClosedErr(t *testing.T, op string, err error) {
+	t.Helper()
+
+	if !errors.Is(err, geo.ErrClosed) {
+		t.Fatalf("%s after Close = %v, want ErrClosed", op, err)
+	}
+}
+
+// nextResult is what a background Next returned.
+type nextResult struct {
+	fix geo.Fix
+	err error
+}
+
+// nextInBackground calls Next on its own goroutine, so the test can publish
+// while it is blocked. The single-slot channel means the goroutine never
+// outlives the test waiting to hand its result over.
+func nextInBackground(
+	ctx context.Context,
+	t *testing.T,
+	service *Service,
+) <-chan nextResult {
+	t.Helper()
+
+	results := make(chan nextResult, 1)
+
+	go func() {
+		fix, err := service.Next(ctx)
+		results <- nextResult{fix: fix, err: err}
+	}()
+
+	return results
+}
+
+// awaitNext waits for a background Next to come back.
+func awaitNext(t *testing.T, results <-chan nextResult) nextResult {
+	t.Helper()
+
+	// t.Fatal ends the test, so the value below is never really returned; it
+	// exists because the compiler cannot know that.
+	var none nextResult
+
+	select {
+	case got := <-results:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("Next did not return")
+
+		return none
+	}
+}
+
+// awaitError waits for the subscriber's next error.
+func awaitError(t *testing.T, errs <-chan error) error {
+	t.Helper()
+
+	select {
+	case err := <-errs:
+		return err
+	case <-time.After(time.Second):
+		t.Fatal("no error reached the subscriber")
+
+		return nil
+	}
+}
+
+// awaitStatus waits for the subscriber's next status.
+func awaitStatus(t *testing.T, statuses <-chan geo.Status) geo.Status {
+	t.Helper()
+
+	var none geo.Status
+
+	select {
+	case status := <-statuses:
+		return status
+	case <-time.After(time.Second):
+		t.Fatal("no status reached the subscriber")
+
+		return none
+	}
+}
+
+// takeFix returns the fix already waiting on the subscription, rather than
+// waiting for one to arrive: the tests using it assert on delivery that has
+// already happened by the time they look.
+func takeFix(t *testing.T, why string, fixes <-chan geo.Fix) geo.Fix {
+	t.Helper()
+
+	select {
+	case fix := <-fixes:
+		return fix
+	default:
+		t.Fatal(why)
+
+		return geo.Fix{}
+	}
+}
+
+// expectNoFix fails if the subscription has a fix waiting.
+func expectNoFix(t *testing.T, why string, fixes <-chan geo.Fix) {
+	t.Helper()
+
+	select {
+	case fix := <-fixes:
+		t.Fatalf("%s: %+v", why, fix)
+	default:
+	}
+}
+
+// expectNoError fails if the subscription has an error waiting.
+func expectNoError(t *testing.T, why string, errs <-chan error) {
+	t.Helper()
+
+	select {
+	case err := <-errs:
+		t.Fatalf("%s: %v", why, err)
+	default:
+	}
+}
+
+// expectNoStatus fails if another status arrives while we watch for one.
+func expectNoStatus(t *testing.T, why string, statuses <-chan geo.Status) {
+	t.Helper()
+
+	select {
+	case status := <-statuses:
+		t.Fatalf("%s: %+v", why, status)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestNextReturnsAFixPublishedAfterTheCall(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -168,71 +384,50 @@ func TestNextReturnsAFixPublishedAfterTheCall(t *testing.T) {
 	// Published before Next registers, so Next must not return it.
 	service.PublishFix(sampleFixAt(epoch, 1, 1))
 
-	result := make(chan geo.Fix, 1)
-
-	go func() {
-		fix, err := service.Next(ctx)
-		if err != nil {
-			t.Errorf("Next: %v", err)
-			close(result)
-
-			return
-		}
-
-		result <- fix
-	}()
+	results := nextInBackground(ctx, t, service)
 
 	awaitWaiter(t, service)
 	service.PublishFix(sampleFixAt(epoch, 2, 2))
 
-	select {
-	case fix, ok := <-result:
-		if !ok {
-			t.Fatal("Next failed")
-		}
+	got := awaitNext(t, results)
+	if got.err != nil {
+		t.Fatalf("Next: %v", got.err)
+	}
 
-		if fix.Latitude != 2 {
-			t.Fatalf("Next returned a fix from before the call: %+v", fix)
-		}
-	case <-ctx.Done():
-		t.Fatal("Next did not return")
+	if got.fix.Latitude != 2 {
+		t.Fatalf("Next returned a fix from before the call: %+v", got.fix)
 	}
 }
 
 func TestNextReturnsABroadcastError(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	want := errors.New("provider exploded")
-	result := make(chan error, 1)
-
-	go func() {
-		_, err := service.Next(ctx)
-		result <- err
-	}()
+	want := errProviderExploded
+	results := nextInBackground(ctx, t, service)
 
 	awaitWaiter(t, service)
 	service.PublishError(want)
 
-	select {
-	case err := <-result:
-		if !errors.Is(err, want) {
-			t.Fatalf("Next error = %v, want %v", err, want)
-		}
-	case <-ctx.Done():
-		t.Fatal("Next did not return")
+	if got := awaitNext(t, results); !errors.Is(got.err, want) {
+		t.Fatalf("Next error = %v, want %v", got.err, want)
 	}
 }
 
 func TestNextHonoursItsContext(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	if _, err := service.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	_, err := service.Next(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Next error = %v, want DeadlineExceeded", err)
 	}
 }
@@ -241,6 +436,8 @@ func TestNextHonoursItsContext(t *testing.T) {
 // the life of the locator, which is what makes Next's deferred RemoveOnce load
 // bearing rather than tidy.
 func TestNextLeavesNoWaiterBehind(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	for range 10 {
@@ -250,17 +447,15 @@ func TestNextLeavesNoWaiterBehind(t *testing.T) {
 		cancel()
 	}
 
-	hub, ok := service.hub.(*chanhub.Hub)
-	if !ok {
-		t.Fatalf("default hub is %T, want *chanhub.Hub", service.hub)
-	}
-
-	if _, waiters := hub.Counts(); waiters != 0 {
+	if _, waiters := testHub(t, service).Counts(); waiters != 0 {
 		t.Fatalf("waiters left registered = %d, want 0", waiters)
 	}
 }
 
 func TestCurrentServesTheCachedFixWhileItIsFresh(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, stopped := newTestService(t)
 	want := sampleFixAt(epoch, 51.5, -0.12)
 	service.PublishFix(want)
@@ -289,6 +484,9 @@ func TestCurrentServesTheCachedFixWhileItIsFresh(t *testing.T) {
 }
 
 func TestCurrentWaitsOnceTheCachedFixGoesStale(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, stopped := newTestService(t)
 	service.PublishFix(sampleFixAt(epoch, 51.5, -0.12))
 
@@ -298,30 +496,25 @@ func TestCurrentWaitsOnceTheCachedFixGoesStale(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	if _, err := service.Current(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	_, err := service.Current(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Current error = %v, want DeadlineExceeded", err)
 	}
 }
 
 func TestAStaleSampleIsRejectedRatherThanCached(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 
-	ctx := t.Context()
-
-	sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 2})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
+	sub := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 2})
 
 	service.PublishFix(sampleFixAt(epoch.Add(-time.Hour), 51.5, -0.12))
 
-	select {
-	case err := <-sub.Errors:
-		if !errors.Is(err, geo.ErrStaleFix) {
-			t.Fatalf("error = %v, want ErrStaleFix", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no error reached the subscriber")
+	err := awaitError(t, sub.Errors)
+	if !errors.Is(err, geo.ErrStaleFix) {
+		t.Fatalf("error = %v, want ErrStaleFix", err)
 	}
 
 	if fix, ok := service.Last(); ok {
@@ -330,39 +523,33 @@ func TestAStaleSampleIsRejectedRatherThanCached(t *testing.T) {
 }
 
 func TestPublishFixRejectsAnUnusableSampleWithThePlatformAnnotated(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 
-	ctx := t.Context()
-
-	sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 2})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
+	sub := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 2})
 
 	service.PublishFix(sampleFixAt(epoch, 91, 0)) // latitude out of range
 
-	select {
-	case err := <-sub.Errors:
-		var annotated *geo.Error
-		if !errors.As(err, &annotated) {
-			t.Fatalf("error = %v, want a *geo.Error", err)
-		}
+	err := awaitError(t, sub.Errors)
 
-		if annotated.Platform != "test" {
-			t.Fatalf("platform = %q, want %q", annotated.Platform, "test")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no error reached the subscriber")
+	var annotated *geo.Error
+	if !errors.As(err, &annotated) {
+		t.Fatalf("error = %v, want a *geo.Error", err)
 	}
 
-	select {
-	case fix := <-sub.Locations:
-		t.Fatalf("an invalid fix reached the subscriber: %+v", fix)
-	default:
+	if annotated.Platform != testPlatform {
+		t.Fatalf("platform = %q, want %q", annotated.Platform, testPlatform)
 	}
+
+	expectNoFix(t, "an invalid fix reached the subscriber", sub.Locations)
 }
 
 func TestAnUnstampedFixIsStampedFromTheClock(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 	service.PublishFix(geo.Fix{Latitude: 1, Longitude: 2, AccuracyMeters: 5})
 
@@ -377,78 +564,55 @@ func TestAnUnstampedFixIsStampedFromTheClock(t *testing.T) {
 }
 
 func TestFirstAdmittedFixAnnouncesReadinessOnce(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 
-	ctx := t.Context()
-
-	sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 8})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
+	sub := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 8})
 	// Drain the priming status so only broadcasts remain.
 	<-sub.Statuses
 
 	service.PublishFix(sampleFixAt(epoch, 10, 10))
 
-	select {
-	case status := <-sub.Statuses:
-		if status.State != geo.StateReady {
-			t.Fatalf("state = %v, want StateReady", status.State)
-		}
+	status := awaitStatus(t, sub.Statuses)
+	if status.State != geo.StateReady {
+		t.Fatalf("state = %v, want StateReady", status.State)
+	}
 
-		if status.Permission != geo.PermissionGranted {
-			t.Fatalf("permission = %v, want PermissionGranted", status.Permission)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("readiness was never announced")
+	if status.Permission != geo.PermissionGranted {
+		t.Fatalf("permission = %v, want PermissionGranted", status.Permission)
 	}
 
 	service.PublishFix(sampleFixAt(epoch, 20, 20))
-
-	select {
-	case status := <-sub.Statuses:
-		t.Fatalf("readiness was announced twice: %+v", status)
-	case <-time.After(50 * time.Millisecond):
-	}
+	expectNoStatus(t, "readiness was announced twice", sub.Statuses)
 }
 
 func TestSubscribeReplaysTheLatestFixOnlyWhenAsked(t *testing.T) {
-	service, _, _ := newTestService(t)
+	t.Parallel()
 
-	ctx := t.Context()
+	epoch := config().epoch
+	service, _, _ := newTestService(t)
 
 	service.PublishFix(sampleFixAt(epoch, 1, 2))
 
-	replaying, err := service.Subscribe(
-		ctx,
+	replaying := subscribe(
+		t, service,
 		fanout.SubscriptionConfig{Buffer: 2, ReplayLatest: true},
 	)
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
+
+	replayed := takeFix(t, "ReplayLatest delivered nothing", replaying.Locations)
+	if replayed.Latitude != 1 {
+		t.Fatalf("replayed %v, want 1", replayed.Latitude)
 	}
 
-	select {
-	case fix := <-replaying.Locations:
-		if fix.Latitude != 1 {
-			t.Fatalf("replayed %v, want 1", fix.Latitude)
-		}
-	default:
-		t.Fatal("ReplayLatest delivered nothing")
-	}
-
-	plain, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 2})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
-
-	select {
-	case fix := <-plain.Locations:
-		t.Fatalf("a plain subscription replayed %+v", fix)
-	default:
-	}
+	plain := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 2})
+	expectNoFix(t, "a plain subscription replayed a fix", plain.Locations)
 }
 
 func TestEndingASubscriptionContextClosesItAndFreesTheRegistration(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -463,37 +627,18 @@ func TestEndingASubscriptionContextClosesItAndFreesTheRegistration(t *testing.T)
 		t.Fatal("a cancelled subscription yielded a fix")
 	}
 
-	hub := service.hub.(*chanhub.Hub)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if subscriptions, _ := hub.Counts(); subscriptions == 0 {
-			return
-		}
-
-		time.Sleep(time.Millisecond)
-	}
-
-	t.Fatal("the subscription stayed registered after its context ended")
+	awaitNoSubscriptions(t, service)
 }
 
 func TestCloseStopsTheProviderOnceAndRejectsLaterCalls(t *testing.T) {
+	t.Parallel()
+
 	service, native, _ := newTestService(t)
 
-	ctx := t.Context()
+	sub := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 2})
 
-	sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 2})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
-
-	if err := service.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	if err := service.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
+	closeService(t, "Close", service)
+	closeService(t, "second Close", service)
 
 	if native.stopped != 1 {
 		t.Fatalf("provider stopped %d times, want 1", native.stopped)
@@ -503,19 +648,11 @@ func TestCloseStopsTheProviderOnceAndRejectsLaterCalls(t *testing.T) {
 		t.Fatal("a closed subscription yielded a fix")
 	}
 
-	if _, err := service.Next(context.Background()); !errors.Is(err, geo.ErrClosed) {
-		t.Fatalf("Next after Close = %v, want ErrClosed", err)
-	}
+	_, err := service.Next(context.Background())
+	expectClosedErr(t, "Next", err)
 
-	if _, err := service.Subscribe(
-		context.Background(),
-		fanout.SubscriptionConfig{},
-	); !errors.Is(
-		err,
-		geo.ErrClosed,
-	) {
-		t.Fatalf("Subscribe after Close = %v, want ErrClosed", err)
-	}
+	_, err = service.Subscribe(context.Background(), fanout.SubscriptionConfig{})
+	expectClosedErr(t, "Subscribe", err)
 
 	if service.Status().State != geo.StateClosed {
 		t.Fatalf("state after Close = %v, want StateClosed", service.Status().State)
@@ -525,13 +662,15 @@ func TestCloseStopsTheProviderOnceAndRejectsLaterCalls(t *testing.T) {
 // Close reports the provider's failure rather than swallowing it, so a caller
 // deferring Close still learns that teardown went wrong.
 func TestCloseReportsTheProviderStopError(t *testing.T) {
-	stopped := fixedclock.New(epoch)
+	t.Parallel()
+
+	stopped := fixedclock.New(config().epoch)
 	service := New(
 		Options{MaximumAge: time.Minute, DefaultChannelBuffer: 1},
 		Features{Clock: stopped},
 	)
-	want := errors.New("stop failed")
-	service.Attach(&fakeProvider{platform: "test", stopErr: want})
+	want := errStopFailed
+	service.Attach(&fakeProvider{platform: testPlatform, stopErr: want})
 
 	err := service.Close()
 	if !errors.Is(err, want) {
@@ -540,6 +679,8 @@ func TestCloseReportsTheProviderStopError(t *testing.T) {
 }
 
 func TestCloseUnblocksNext(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 	result := make(chan error, 1)
 
@@ -563,6 +704,8 @@ func TestCloseUnblocksNext(t *testing.T) {
 }
 
 func TestSubscribeRejectsAnInvalidConfig(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	cases := map[string]fanout.SubscriptionConfig{
@@ -571,13 +714,10 @@ func TestSubscribeRejectsAnInvalidConfig(t *testing.T) {
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := service.Subscribe(
-				context.Background(),
-				cfg,
-			); !errors.Is(
-				err,
-				geo.ErrInvalidConfig,
-			) {
+			t.Parallel()
+
+			_, err := service.Subscribe(context.Background(), cfg)
+			if !errors.Is(err, geo.ErrInvalidConfig) {
 				t.Fatalf("Subscribe = %v, want ErrInvalidConfig", err)
 			}
 		})
@@ -585,6 +725,8 @@ func TestSubscribeRejectsAnInvalidConfig(t *testing.T) {
 }
 
 func TestSubscribeAppliesTheConfiguredDefaults(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	cfg, err := service.normalizeSubscription(fanout.SubscriptionConfig{})
@@ -602,6 +744,8 @@ func TestSubscribeAppliesTheConfiguredDefaults(t *testing.T) {
 }
 
 func TestNilContextIsRejectedRatherThanPanicking(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	// A nil Context is exactly what is under test, but it is also what every
@@ -609,21 +753,18 @@ func TestNilContextIsRejectedRatherThanPanicking(t *testing.T) {
 	// sites honest without a suppression on each one.
 	var nilCtx context.Context
 
-	if _, err := service.Current(nilCtx); !errors.Is(err, geo.ErrInvalidConfig) {
+	_, err := service.Current(nilCtx)
+	if !errors.Is(err, geo.ErrInvalidConfig) {
 		t.Errorf("Current(nil) = %v, want ErrInvalidConfig", err)
 	}
 
-	if _, err := service.Next(nilCtx); !errors.Is(err, geo.ErrInvalidConfig) {
+	_, err = service.Next(nilCtx)
+	if !errors.Is(err, geo.ErrInvalidConfig) {
 		t.Errorf("Next(nil) = %v, want ErrInvalidConfig", err)
 	}
 
-	if _, err := service.Subscribe(
-		nilCtx,
-		fanout.SubscriptionConfig{},
-	); !errors.Is(
-		err,
-		geo.ErrInvalidConfig,
-	) {
+	_, err = service.Subscribe(nilCtx, fanout.SubscriptionConfig{})
+	if !errors.Is(err, geo.ErrInvalidConfig) {
 		t.Errorf("Subscribe(nil) = %v, want ErrInvalidConfig", err)
 	}
 }
@@ -632,31 +773,31 @@ func TestNilContextIsRejectedRatherThanPanicking(t *testing.T) {
 // adapter. A nil left behind would not fail until the first publish, on a
 // native callback thread, as a panic.
 func TestAZeroFeaturesGetsEveryDefaultAdapter(t *testing.T) {
+	t.Parallel()
+
 	service := New(Options{}, Features{})
 
 	t.Cleanup(func() { _ = service.Close() })
 
-	if service.clock == nil {
-		t.Error("clock was left nil")
+	for name, feature := range map[string]any{
+		"clock":     service.clock,
+		"gate":      service.gate,
+		"hub":       service.hub,
+		"cache":     service.cache,
+		"lifecycle": service.lifecycle,
+	} {
+		if feature == nil {
+			t.Errorf("%s was left nil", name)
+		}
 	}
 
-	if service.gate == nil {
-		t.Error("gate was left nil")
-	}
+	expectInitialStatus(t, service.Status())
+}
 
-	if service.hub == nil {
-		t.Error("hub was left nil")
-	}
+// expectInitialStatus fails unless status is the one New starts a Service on.
+func expectInitialStatus(t *testing.T, status geo.Status) {
+	t.Helper()
 
-	if service.cache == nil {
-		t.Error("cache was left nil")
-	}
-
-	if service.lifecycle == nil {
-		t.Error("lifecycle was left nil")
-	}
-
-	status := service.Status()
 	if status.State != geo.StateStarting {
 		t.Errorf("state = %v, want StateStarting", status.State)
 	}
@@ -671,8 +812,10 @@ func TestAZeroFeaturesGetsEveryDefaultAdapter(t *testing.T) {
 }
 
 func TestCurrentAfterCloseReturnsErrClosed(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
-	service.PublishFix(sampleFixAt(epoch, 1, 2))
+	service.PublishFix(sampleFixAt(config().epoch, 1, 2))
 
 	err := service.Close()
 	if err != nil {
@@ -681,12 +824,15 @@ func TestCurrentAfterCloseReturnsErrClosed(t *testing.T) {
 
 	// A cached fix is present and fresh, so this proves the closed check runs
 	// ahead of the cache rather than serving a fix from a dead locator.
-	if _, err := service.Current(context.Background()); !errors.Is(err, geo.ErrClosed) {
+	_, err = service.Current(context.Background())
+	if !errors.Is(err, geo.ErrClosed) {
 		t.Fatalf("Current after Close = %v, want ErrClosed", err)
 	}
 }
 
 func TestCapabilitiesComeFromTheAttachedProvider(t *testing.T) {
+	t.Parallel()
+
 	service, native, _ := newTestService(t)
 
 	got := service.Capabilities()
@@ -701,35 +847,35 @@ func TestCapabilitiesComeFromTheAttachedProvider(t *testing.T) {
 // shared with a torn-down peer, say — and Next must surface that rather than
 // block on a channel nobody will ever send to.
 func TestNextReportsAFailedWaiterRegistration(t *testing.T) {
+	t.Parallel()
+
 	hub := newStubHub()
-	want := errors.New("hub refused the waiter")
+	want := errHubRefusedWaiter
 	hub.addOnceErr = want
 	service := New(
 		Options{MaximumAge: time.Minute, DefaultChannelBuffer: 1},
-		Features{Clock: fixedclock.New(epoch), Hub: hub},
+		Features{Clock: fixedclock.New(config().epoch), Hub: hub},
 	)
 
-	if _, err := service.Next(context.Background()); !errors.Is(err, want) {
+	_, err := service.Next(context.Background())
+	if !errors.Is(err, want) {
 		t.Fatalf("Next = %v, want %v", err, want)
 	}
 }
 
 func TestSubscribeReportsAFailedRegistration(t *testing.T) {
+	t.Parallel()
+
 	hub := newStubHub()
-	want := errors.New("hub refused the subscription")
+	want := errHubRefusedSub
 	hub.addErr = want
 	service := New(
 		Options{MaximumAge: time.Minute, DefaultChannelBuffer: 1},
-		Features{Clock: fixedclock.New(epoch), Hub: hub},
+		Features{Clock: fixedclock.New(config().epoch), Hub: hub},
 	)
 
-	if _, err := service.Subscribe(
-		context.Background(),
-		fanout.SubscriptionConfig{Buffer: 1},
-	); !errors.Is(
-		err,
-		want,
-	) {
+	_, err := service.Subscribe(context.Background(), fanout.SubscriptionConfig{Buffer: 1})
+	if !errors.Is(err, want) {
 		t.Fatalf("Subscribe = %v, want %v", err, want)
 	}
 }
@@ -737,6 +883,9 @@ func TestSubscribeReportsAFailedRegistration(t *testing.T) {
 // A provider can call back one more time after Stop returns, so a publish
 // arriving after Close must not disturb what the last live session cached.
 func TestPublishFixAfterCloseLeavesTheCacheAlone(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	service, _, _ := newTestService(t)
 	want := sampleFixAt(epoch, 51.5, -0.12)
 	service.PublishFix(want)
@@ -763,6 +912,9 @@ func TestPublishFixAfterCloseLeavesTheCacheAlone(t *testing.T) {
 // servable. That silence is what distinguishes it from a rejection with an
 // error.
 func TestAFixDeclinedByTheGateLeavesThePreviousOneCached(t *testing.T) {
+	t.Parallel()
+
+	epoch := config().epoch
 	stopped := fixedclock.New(epoch)
 	service := New(Options{
 		MinimumInterval:      time.Minute,
@@ -770,15 +922,10 @@ func TestAFixDeclinedByTheGateLeavesThePreviousOneCached(t *testing.T) {
 		DefaultChannelBuffer: 4,
 		DefaultDropPolicy:    fanout.DropOldest,
 	}, Features{Clock: stopped})
-	service.Attach(&fakeProvider{platform: "test"})
+	service.Attach(&fakeProvider{platform: testPlatform})
 	t.Cleanup(func() { _ = service.Close() })
 
-	ctx := t.Context()
-
-	sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 4})
-	if err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
+	sub := subscribe(t, service, fanout.SubscriptionConfig{Buffer: 4})
 
 	first := sampleFixAt(epoch, 51.5, -0.12)
 	service.PublishFix(first)
@@ -796,29 +943,22 @@ func TestAFixDeclinedByTheGateLeavesThePreviousOneCached(t *testing.T) {
 		t.Fatalf("cached latitude = %v, want the admitted %v", got.Latitude, first.Latitude)
 	}
 
-	select {
-	case fix := <-sub.Locations:
-		t.Fatalf("a declined fix was broadcast: %+v", fix)
-	default:
-	}
-
-	select {
-	case err := <-sub.Errors:
-		t.Fatalf("a declined fix reported an error: %v", err)
-	default:
-	}
+	expectNoFix(t, "a declined fix was broadcast", sub.Locations)
+	expectNoError(t, "a declined fix reported an error", sub.Errors)
 }
 
 func TestPublishErrorDropsNilAndAnythingAfterClose(t *testing.T) {
+	t.Parallel()
+
 	hub := newStubHub()
 	service := New(
 		Options{MaximumAge: time.Minute, DefaultChannelBuffer: 1},
-		Features{Clock: fixedclock.New(epoch), Hub: hub},
+		Features{Clock: fixedclock.New(config().epoch), Hub: hub},
 	)
 
 	service.PublishError(nil)
 
-	if _, errs, _ := hub.counts(); errs != 0 {
+	if errs := hub.errorCount(); errs != 0 {
 		t.Fatalf("a nil error was broadcast %d times, want 0", errs)
 	}
 
@@ -827,9 +967,9 @@ func TestPublishErrorDropsNilAndAnythingAfterClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	service.PublishError(errors.New("late failure"))
+	service.PublishError(errLateFailure)
 
-	if _, errs, _ := hub.counts(); errs != 0 {
+	if errs := hub.errorCount(); errs != 0 {
 		t.Fatalf("an error after Close was broadcast %d times, want 0", errs)
 	}
 }
@@ -838,6 +978,8 @@ func TestPublishErrorDropsNilAndAnythingAfterClose(t *testing.T) {
 // StateClosed has to be exempt from the drop — otherwise the locator's own
 // shutdown would be the one status nobody hears.
 func TestPublishStatusAfterCloseIsDroppedExceptForTheClosingOne(t *testing.T) {
+	t.Parallel()
+
 	service, _, _ := newTestService(t)
 
 	err := service.Close()
@@ -855,5 +997,57 @@ func TestPublishStatusAfterCloseIsDroppedExceptForTheClosingOne(t *testing.T) {
 
 	if got := service.Status(); got.Message != "closed again" {
 		t.Fatalf("message = %q, want the closing status to still be recorded", got.Message)
+	}
+}
+
+func TestStartStartsTheAttachedProvider(t *testing.T) {
+	t.Parallel()
+
+	service, native, _ := newTestService(t)
+
+	err := service.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if native.started != 1 {
+		t.Fatalf("provider started %d times, want 1", native.started)
+	}
+}
+
+// Attach is the only thing that gives the Service something to start, so a
+// Service that was never attached has to say so rather than panic on a nil
+// provider.
+func TestStartWithoutAProviderReportsAnInvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	service := New(
+		Options{MaximumAge: time.Minute, DefaultChannelBuffer: 1},
+		Features{Clock: fixedclock.New(config().epoch)},
+	)
+
+	t.Cleanup(func() { _ = service.Close() })
+
+	err := service.Start(context.Background())
+	if !errors.Is(err, geo.ErrInvalidConfig) {
+		t.Fatalf("Start with no provider = %v, want ErrInvalidConfig", err)
+	}
+}
+
+// The platform name is read at Attach precisely so a startup failure can be
+// attributed without touching the adapter again.
+func TestStartAnnotatesTheProviderFailureWithThePlatform(t *testing.T) {
+	t.Parallel()
+
+	service, native, _ := newTestService(t)
+	native.startErr = errStartFailed
+
+	err := service.Start(context.Background())
+	if !errors.Is(err, errStartFailed) {
+		t.Fatalf("Start = %v, want %v", err, errStartFailed)
+	}
+
+	if !strings.Contains(err.Error(), testPlatform) {
+		t.Fatalf("Start error %q does not name the %q platform", err, testPlatform)
 	}
 }

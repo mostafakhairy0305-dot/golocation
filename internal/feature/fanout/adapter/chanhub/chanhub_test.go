@@ -1,4 +1,4 @@
-package chanhub
+package chanhub_test
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mostafakhairy0305-dot/golocation/geo"
+	"github.com/mostafakhairy0305-dot/golocation/internal/feature/fanout/adapter/chanhub"
 	fanout "github.com/mostafakhairy0305-dot/golocation/internal/feature/fanout/port"
 )
 
@@ -13,17 +14,114 @@ func fixAt(lat float64) geo.Fix {
 	return geo.Fix{Latitude: lat, Timestamp: time.Now().UTC()}
 }
 
-func TestDropOldestKeepsTheNewestValue(t *testing.T) {
-	hub := New()
-	defer hub.Close()
+// Failures the tests broadcast. Values rather than literals so an assertion
+// can name the exact error it expects to come back out.
+var (
+	errLate           = errors.New("late")
+	errProviderFailed = errors.New("provider failed")
+)
 
-	_, stream, err := hub.Add(
-		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
-		fanout.Priming{},
-	)
+// addStream registers a subscription the Hub is expected to accept. Every test
+// below needs one before it can assert anything, and a refusal is never the
+// thing under test — so it ends the test rather than returning an error.
+func addStream(
+	t *testing.T,
+	hub *chanhub.Hub,
+	cfg fanout.SubscriptionConfig,
+	priming fanout.Priming,
+) (uint64, fanout.Subscription) {
+	t.Helper()
+
+	id, stream, err := hub.Add(cfg, priming)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
+	return id, stream
+}
+
+// addWaiter registers a one-shot waiter the Hub is expected to accept.
+func addWaiter(t *testing.T, hub *chanhub.Hub) (uint64, <-chan fanout.Event) {
+	t.Helper()
+
+	id, events, err := hub.AddOnce()
+	if err != nil {
+		t.Fatalf("AddOnce: %v", err)
+	}
+
+	return id, events
+}
+
+// expectStatus fails unless the named subscription already has want waiting.
+func expectStatus(
+	t *testing.T,
+	name string,
+	statuses <-chan geo.Status,
+	want geo.Status,
+) {
+	t.Helper()
+
+	select {
+	case got := <-statuses:
+		if got.Message != want.Message || got.State != want.State {
+			t.Fatalf("%s subscription status = %+v, want %+v", name, got, want)
+		}
+	default:
+		t.Fatalf("the status never reached the %s subscription", name)
+	}
+}
+
+// expectNoEvent fails if the waiter was woken at all.
+func expectNoEvent(t *testing.T, why string, events <-chan fanout.Event) {
+	t.Helper()
+
+	select {
+	case event := <-events:
+		t.Fatalf("%s: %+v", why, event)
+	default:
+	}
+}
+
+// expectClosed fails unless the channel is closed rather than merely empty.
+func expectClosed[T any](t *testing.T, name string, ch <-chan T) {
+	t.Helper()
+
+	if _, ok := <-ch; ok {
+		t.Fatalf("the %s channel stayed open after Close", name)
+	}
+}
+
+// expectDone fails unless the Hub has signalled shutdown.
+func expectDone(t *testing.T, hub *chanhub.Hub) {
+	t.Helper()
+
+	select {
+	case <-hub.Done():
+	default:
+		t.Fatal("Done did not close")
+	}
+}
+
+// expectClosedErr fails unless err reports a closed Hub.
+func expectClosedErr(t *testing.T, op string, err error) {
+	t.Helper()
+
+	if !errors.Is(err, geo.ErrClosed) {
+		t.Fatalf("%s after Close = %v, want ErrClosed", op, err)
+	}
+}
+
+func TestDropOldestKeepsTheNewestValue(t *testing.T) {
+	t.Parallel()
+
+	hub := chanhub.New()
+	defer hub.Close()
+
+	_, stream := addStream(
+		t, hub,
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 
 	hub.BroadcastFix(fixAt(1))
 	hub.BroadcastFix(fixAt(2))
@@ -36,16 +134,16 @@ func TestDropOldestKeepsTheNewestValue(t *testing.T) {
 }
 
 func TestDropNewestKeepsTheQueuedValue(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(
+	_, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropNewest},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 
 	hub.BroadcastFix(fixAt(1))
 	hub.BroadcastFix(fixAt(2))
@@ -60,7 +158,9 @@ func TestDropNewestKeepsTheQueuedValue(t *testing.T) {
 // Priming is applied while the registration lock is held so that a broadcast
 // racing Add can only land after it, never in front of it.
 func TestPrimingArrivesBeforeAnyBroadcast(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
 	priming := fanout.Priming{
@@ -69,13 +169,11 @@ func TestPrimingArrivesBeforeAnyBroadcast(t *testing.T) {
 		HasFix: true,
 	}
 
-	_, stream, err := hub.Add(
+	_, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 4, DropPolicy: fanout.DropOldest, ReplayLatest: true},
 		priming,
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 
 	hub.BroadcastFix(fixAt(8))
 
@@ -93,16 +191,16 @@ func TestPrimingArrivesBeforeAnyBroadcast(t *testing.T) {
 }
 
 func TestReplayLatestIsIgnoredWithoutAFix(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(
+	_, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest, ReplayLatest: true},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 
 	select {
 	case fix := <-stream.Locations:
@@ -112,40 +210,34 @@ func TestReplayLatestIsIgnoredWithoutAFix(t *testing.T) {
 }
 
 func TestWaiterTakesTheFirstEventAndIgnoresTheRest(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, events, err := hub.AddOnce()
-	if err != nil {
-		t.Fatalf("AddOnce: %v", err)
-	}
+	_, events := addWaiter(t, hub)
 
 	hub.BroadcastFix(fixAt(1))
 	hub.BroadcastFix(fixAt(2))
-	hub.BroadcastError(errors.New("late"))
+	hub.BroadcastError(errLate)
 
 	event := <-events
 	if event.Err != nil || event.Fix.Latitude != 1 {
 		t.Fatalf("event = %+v, want the first fix", event)
 	}
 
-	select {
-	case extra := <-events:
-		t.Fatalf("a one-shot waiter delivered twice: %+v", extra)
-	default:
-	}
+	expectNoEvent(t, "a one-shot waiter delivered twice", events)
 }
 
 func TestWaiterReceivesAnError(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, events, err := hub.AddOnce()
-	if err != nil {
-		t.Fatalf("AddOnce: %v", err)
-	}
+	_, events := addWaiter(t, hub)
 
-	want := errors.New("provider failed")
+	want := errProviderFailed
 	hub.BroadcastError(want)
 
 	if event := <-events; !errors.Is(event.Err, want) {
@@ -156,18 +248,18 @@ func TestWaiterReceivesAnError(t *testing.T) {
 // BroadcastError reaches subscriptions as well as waiters. The waiter half is
 // covered above; this pins the half a subscriber actually observes.
 func TestBroadcastErrorReachesSubscriptions(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(
+	_, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 
-	want := errors.New("provider failed")
+	want := errProviderFailed
 	hub.BroadcastError(want)
 
 	select {
@@ -184,29 +276,15 @@ func TestBroadcastErrorReachesSubscriptions(t *testing.T) {
 // failure, and "still starting" is neither. That asymmetry against
 // BroadcastError is the behaviour worth pinning here.
 func TestBroadcastStatusReachesSubscriptionsButNeverWaiters(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, first, err := hub.Add(
-		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
-		fanout.Priming{},
-	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	_, second, err := hub.Add(
-		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
-		fanout.Priming{},
-	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	_, events, err := hub.AddOnce()
-	if err != nil {
-		t.Fatalf("AddOnce: %v", err)
-	}
+	cfg := fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest}
+	_, first := addStream(t, hub, cfg, fanout.Priming{})
+	_, second := addStream(t, hub, cfg, fanout.Priming{})
+	_, events := addWaiter(t, hub)
 
 	// Drain the priming status each subscription received at registration.
 	<-first.Statuses
@@ -215,35 +293,22 @@ func TestBroadcastStatusReachesSubscriptionsButNeverWaiters(t *testing.T) {
 	want := geo.Status{State: geo.StateReady, Message: "receiving locations"}
 	hub.BroadcastStatus(want)
 
-	for name, statuses := range map[string]<-chan geo.Status{"first": first.Statuses, "second": second.Statuses} {
-		select {
-		case got := <-statuses:
-			if got.Message != want.Message || got.State != want.State {
-				t.Fatalf("%s subscription status = %+v, want %+v", name, got, want)
-			}
-		default:
-			t.Fatalf("the status never reached the %s subscription", name)
-		}
-	}
-
-	select {
-	case event := <-events:
-		t.Fatalf("a status woke a one-shot waiter: %+v", event)
-	default:
-	}
+	expectStatus(t, "first", first.Statuses, want)
+	expectStatus(t, "second", second.Statuses, want)
+	expectNoEvent(t, "a status woke a one-shot waiter", events)
 }
 
 func TestDropOldestKeepsTheNewestStatus(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(
+	_, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 	// The priming status already fills the single slot, so every broadcast
 	// below walks offer's discard branch.
 	hub.BroadcastStatus(geo.Status{State: geo.StateStarting, Message: "one"})
@@ -256,23 +321,18 @@ func TestDropOldestKeepsTheNewestStatus(t *testing.T) {
 }
 
 func TestRemoveOnceStopsDelivery(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	id, events, err := hub.AddOnce()
-	if err != nil {
-		t.Fatalf("AddOnce: %v", err)
-	}
+	id, events := addWaiter(t, hub)
 
 	hub.RemoveOnce(id)
 	hub.RemoveOnce(id) // idempotent
 	hub.BroadcastFix(fixAt(1))
 
-	select {
-	case event := <-events:
-		t.Fatalf("an unregistered waiter received %+v", event)
-	default:
-	}
+	expectNoEvent(t, "an unregistered waiter received an event", events)
 
 	if _, waiters := hub.Counts(); waiters != 0 {
 		t.Fatalf("waiters = %d, want 0", waiters)
@@ -280,55 +340,34 @@ func TestRemoveOnceStopsDelivery(t *testing.T) {
 }
 
 func TestCloseClosesEveryChannelAndRejectsNewRegistrations(t *testing.T) {
-	hub := New()
+	t.Parallel()
 
-	id, stream, err := hub.Add(
+	hub := chanhub.New()
+
+	id, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	_, events, err := hub.AddOnce()
-	if err != nil {
-		t.Fatalf("AddOnce: %v", err)
-	}
+	_, events := addWaiter(t, hub)
 
 	hub.Close()
 	hub.Close() // idempotent
 
-	for range stream.Locations {
-	}
-
-	for range stream.Errors {
-	}
-
-	if _, ok := <-events; ok {
-		t.Fatal("a waiter channel stayed open after Close")
-	}
-
-	select {
-	case <-hub.Done():
-	default:
-		t.Fatal("Done did not close")
-	}
+	// Neither channel was primed, so a receive that yields nothing is proof
+	// Close closed it rather than proof it is merely empty.
+	expectClosed(t, "fix", stream.Locations)
+	expectClosed(t, "error", stream.Errors)
+	expectClosed(t, "waiter", events)
+	expectDone(t, hub)
 
 	hub.Remove(id) // must not double-close
 
-	if _, _, err := hub.Add(
-		fanout.SubscriptionConfig{Buffer: 1},
-		fanout.Priming{},
-	); !errors.Is(
-		err,
-		geo.ErrClosed,
-	) {
-		t.Fatalf("Add after Close = %v, want ErrClosed", err)
-	}
+	_, _, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1}, fanout.Priming{})
+	expectClosedErr(t, "Add", err)
 
-	if _, _, err := hub.AddOnce(); !errors.Is(err, geo.ErrClosed) {
-		t.Fatalf("AddOnce after Close = %v, want ErrClosed", err)
-	}
+	_, _, err = hub.AddOnce()
+	expectClosedErr(t, "AddOnce", err)
 
 	if streams, waiters := hub.Counts(); streams != 0 || waiters != 0 {
 		t.Fatalf("counts after Close = %d/%d, want 0/0", streams, waiters)
@@ -336,23 +375,21 @@ func TestCloseClosesEveryChannelAndRejectsNewRegistrations(t *testing.T) {
 }
 
 func TestRemoveClosesTheStreamAndIsIdempotent(t *testing.T) {
-	hub := New()
+	t.Parallel()
+
+	hub := chanhub.New()
 	defer hub.Close()
 
-	id, stream, err := hub.Add(
+	id, stream := addStream(
+		t, hub,
 		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
 		fanout.Priming{},
 	)
-	if err != nil {
-		t.Fatalf("Add: %v", err)
-	}
 
 	hub.Remove(id)
 	hub.Remove(id)
 
-	if _, ok := <-stream.Errors; ok {
-		t.Fatal("a removed stream stayed open")
-	}
+	expectClosed(t, "error", stream.Errors)
 
 	hub.BroadcastFix(fixAt(1)) // must not send on a closed channel
 
@@ -362,11 +399,12 @@ func TestRemoveClosesTheStreamAndIsIdempotent(t *testing.T) {
 }
 
 func BenchmarkBroadcastFixToWaiters(b *testing.B) {
-	hub := New()
+	hub := chanhub.New()
 	defer hub.Close()
 
 	for range 8 {
-		if _, _, err := hub.AddOnce(); err != nil {
+		_, _, err := hub.AddOnce()
+		if err != nil {
 			b.Fatalf("AddOnce: %v", err)
 		}
 	}

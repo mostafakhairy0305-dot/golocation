@@ -9,6 +9,6 @@ import (
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
 
-func newProvider(_ provider.Options, _ provider.Sink) (provider.Provider, error) {
+func newProvider(_ provider.Options, _ provider.Host) error {
 	return unsupported.New(runtime.GOOS)
 }

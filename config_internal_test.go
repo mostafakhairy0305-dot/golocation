@@ -6,11 +6,17 @@ import (
 	"time"
 )
 
+// The failure os.Executable reports when the platform cannot name the running
+// binary, which is what sends desktopIDFrom to its fallback.
+var errNoExecutablePath = errors.New("readlink /proc/self/exe: no such file")
+
 // Setting one field used to skip the defaults for every other field, because
 // MinimumInterval and MaximumAge were only filled in on the all-zero shortcut
 // path. A zero MaximumAge disables the staleness check entirely, so this
 // regressed Current into serving arbitrarily old fixes.
 func TestNormalizeConfigDefaultsEveryFieldIndependently(t *testing.T) {
+	t.Parallel()
+
 	defaults := DefaultConfig()
 
 	cases := []struct {
@@ -24,50 +30,59 @@ func TestNormalizeConfigDefaultsEveryFieldIndependently(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			out, err := normalizeConfig(tc.in)
 			if err != nil {
 				t.Fatalf("normalizeConfig: %v", err)
 			}
 
-			if out.MinimumInterval != defaults.MinimumInterval {
-				t.Errorf(
-					"MinimumInterval = %v, want %v",
-					out.MinimumInterval,
-					defaults.MinimumInterval,
-				)
-			}
-
-			if out.MaximumAge != defaults.MaximumAge {
-				t.Errorf("MaximumAge = %v, want %v", out.MaximumAge, defaults.MaximumAge)
-			}
-
-			if out.StartTimeout != defaults.StartTimeout {
-				t.Errorf("StartTimeout = %v, want %v", out.StartTimeout, defaults.StartTimeout)
-			}
-
-			if out.DefaultDropPolicy != defaults.DefaultDropPolicy {
-				t.Errorf(
-					"DefaultDropPolicy = %v, want %v",
-					out.DefaultDropPolicy,
-					defaults.DefaultDropPolicy,
-				)
-			}
-
-			if out.Linux.DesktopID == "" {
-				t.Error("Linux.DesktopID is empty")
-			}
+			expectDefaults(t, out, defaults)
 		})
 	}
 }
 
+// expectDefaults fails for every field normalizeConfig should have filled in,
+// reporting all of them rather than stopping at the first: which fields a
+// half-applied default missed is the whole diagnosis.
+func expectDefaults(t *testing.T, out, defaults Config) {
+	t.Helper()
+
+	type durations struct{ got, want time.Duration }
+
+	for name, field := range map[string]durations{
+		"MinimumInterval": {out.MinimumInterval, defaults.MinimumInterval},
+		"MaximumAge":      {out.MaximumAge, defaults.MaximumAge},
+		"StartTimeout":    {out.StartTimeout, defaults.StartTimeout},
+	} {
+		if field.got != field.want {
+			t.Errorf("%s = %v, want %v", name, field.got, field.want)
+		}
+	}
+
+	if out.DefaultDropPolicy != defaults.DefaultDropPolicy {
+		t.Errorf(
+			"DefaultDropPolicy = %v, want %v",
+			out.DefaultDropPolicy,
+			defaults.DefaultDropPolicy,
+		)
+	}
+
+	if out.Linux.DesktopID == "" {
+		t.Error("Linux.DesktopID is empty")
+	}
+}
+
 func TestNormalizeConfigKeepsExplicitValues(t *testing.T) {
-	in := Config{
+	t.Parallel()
+
+	explicit := Config{
 		MinimumInterval: 5 * time.Second,
 		MaximumAge:      time.Minute,
 		StartTimeout:    2 * time.Second,
 	}
 
-	out, err := normalizeConfig(in)
+	out, err := normalizeConfig(explicit)
 	if err != nil {
 		t.Fatalf("normalizeConfig: %v", err)
 	}
@@ -86,6 +101,8 @@ func TestNormalizeConfigKeepsExplicitValues(t *testing.T) {
 }
 
 func TestNormalizeConfigRejectsInvalid(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		in   Config
@@ -104,7 +121,10 @@ func TestNormalizeConfigRejectsInvalid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := normalizeConfig(tc.in); err == nil {
+			t.Parallel()
+
+			_, err := normalizeConfig(tc.in)
+			if err == nil {
 				t.Fatal("expected an error, got nil")
 			}
 		})
@@ -116,27 +136,36 @@ func TestNormalizeConfigRejectsInvalid(t *testing.T) {
 // a derivation that returned one would make Open fail on Linux for reasons the
 // caller never configured. Both fallbacks exist to keep that from happening.
 func TestDesktopIDAlwaysDerivesANonEmptyName(t *testing.T) {
+	t.Parallel()
+
+	const appName = "myapp"
+
 	cases := map[string]struct {
-		executable string
-		err        error
+		executable string `exhaustruct:"optional"`
+		err        error  `exhaustruct:"optional"`
 		want       string
 	}{
-		"a plain name":            {executable: "/usr/local/bin/myapp", want: "myapp"},
-		"an extension is dropped": {executable: "/usr/local/bin/myapp.exe", want: "myapp"},
-		"no directory":            {executable: "myapp", want: "myapp"},
+		"a plain name": {executable: "/usr/local/bin/" + appName, want: appName},
+		"an extension is dropped": {
+			executable: "/usr/local/bin/" + appName + ".exe",
+			want:       appName,
+		},
+		"no directory": {executable: appName, want: appName},
 		"the executable is unknown": {
-			err:  errors.New("readlink /proc/self/exe: no such file"),
-			want: "golocation",
+			err:  errNoExecutablePath,
+			want: fallbackDesktopID,
 		},
 		// filepath.Ext of a dotfile is the whole name, so trimming it leaves
 		// nothing behind — the one input that reaches the second fallback.
 		"a dotfile leaves nothing behind": {
-			executable: "/usr/local/bin/.myapp",
-			want:       "golocation",
+			executable: "/usr/local/bin/." + appName,
+			want:       fallbackDesktopID,
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := desktopIDFrom(tc.executable, tc.err); got != tc.want {
 				t.Fatalf("desktopIDFrom(%q, %v) = %q, want %q", tc.executable, tc.err, got, tc.want)
 			}
@@ -147,6 +176,8 @@ func TestDesktopIDAlwaysDerivesANonEmptyName(t *testing.T) {
 // Whatever the real executable is called, the derived ID has to survive
 // normalizeConfig's own blank check — which is the only consumer that matters.
 func TestTheDerivedDesktopIDIsAcceptedByNormalizeConfig(t *testing.T) {
+	t.Parallel()
+
 	out, err := normalizeConfig(Config{})
 	if err != nil {
 		t.Fatalf("normalizeConfig: %v", err)
