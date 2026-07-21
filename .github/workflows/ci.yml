@@ -5,23 +5,25 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: write
-  pull-requests: write
-
+permissions: {}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   taskotter:
+    name: Sync TaskOtter taskfiles
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          persist-credentials: false
+          fetch-depth: 0
+          persist-credentials: true
       - name: Sync TaskOtter taskfiles
         uses: ./.github/actions/taskotter
         with:
