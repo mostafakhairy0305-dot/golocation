@@ -26,6 +26,7 @@ type Locator interface {
 	Status() geo.Status
 	// Capabilities reports which optional Fix fields the active provider can supply.
 	Capabilities() geo.Capabilities
-	// Close stops the provider and closes every subscription. It is idempotent.
+	// Close stops the provider and closes every subscription. The teardown runs
+	// once; Close reports the provider's stop error, if any, on every call.
 	Close() error
 }

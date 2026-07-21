@@ -64,9 +64,11 @@ func open(
 	err = startNative(ctx, cfg, service)
 	if err != nil {
 		// Close runs the same teardown a caller would get, rather than a
-		// hand-rolled subset that drifts. It is safe here because closeOnce
-		// guards it and every adapter's Stop is idempotent.
-		_ = service.Close()
+		// hand-rolled subset that drifts. It is safe here because the Service's
+		// close guard runs the teardown once and every adapter's Stop is
+		// idempotent. Close takes no context by design — its teardown is
+		// deliberately deadline-free — so there is none to thread through here.
+		_ = service.Close() //nolint:contextcheck // Close is context-free by API contract
 
 		return nil, err
 	}

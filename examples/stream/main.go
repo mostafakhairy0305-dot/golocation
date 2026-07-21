@@ -18,13 +18,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	location "github.com/mostafakhairy0305-dot/golocation"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
+	"github.com/mostafakhairy0305-dot/singleton"
 )
 
 const (
@@ -100,12 +100,23 @@ func stream(
 	var (
 		fixes  atomic.Int64
 		closed = make(chan struct{})
-		once   sync.Once
 	)
 
 	// Any one channel closing means the subscription is over, and all three
-	// close together — so the first to notice wins and the rest are no-ops.
-	done := func() { once.Do(func() { close(closed) }) }
+	// close together — so the first to notice wins and the rest are no-ops. The
+	// guard closes closed exactly once, however many drains reach for it.
+	closeOnce := singleton.MustNew(
+		func(context.Context) (struct{}, error) {
+			close(closed)
+
+			return struct{}{}, nil
+		},
+		singleton.WithMaxAttempts(1),
+	)
+	// The guard's teardown only closes a channel, so it must run even once ctx
+	// is cancelled: a context derived from ctx but stripped of the cancellation
+	// keeps that promise while staying inherited.
+	done := func() { _, _ = closeOnce.Get(context.WithoutCancel(ctx)) }
 
 	go drainFixes(out, sub.Locations, &fixes, done)
 	go drainStatuses(out, sub.Statuses, done)

@@ -169,10 +169,11 @@ func TestSessionCloseReportsAFailedProviderStop(t *testing.T) {
 		t.Fatalf("Close = %v, want the provider's stop error", err)
 	}
 
-	// Idempotent: the second call has nothing left to stop, so it reports
-	// nothing rather than the same failure twice.
+	// The teardown runs once, but its outcome is cached: a second Close reports
+	// the same stop error rather than swallowing it, so a caller that only
+	// deferred Close still learns the native service went down badly.
 	err = session.Close()
-	if err != nil {
-		t.Fatalf("second Close = %v, want nil", err)
+	if !errors.Is(err, errStopFailed) {
+		t.Fatalf("second Close = %v, want the same stop error", err)
 	}
 }

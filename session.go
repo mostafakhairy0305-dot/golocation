@@ -63,7 +63,8 @@ func (s *Session) Status() geo.Status { return s.service.Status() }
 // Capabilities reports which optional Fix fields the active provider can supply.
 func (s *Session) Capabilities() geo.Capabilities { return s.service.Capabilities() }
 
-// Close stops the provider and closes every subscription. It is idempotent.
+// Close stops the provider and closes every subscription. The teardown runs
+// once; Close reports the provider's stop error, if any, on every call.
 func (s *Session) Close() error {
 	err := s.service.Close()
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/foundation"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/singleton"
 )
 
 const platform = "windows"
@@ -51,12 +52,25 @@ type Backend struct {
 	positionEvent *geolocation.TypedEventHandlerOfGeolocatorAndPositionChangedEventArgs `exhaustruct:"optional"`
 	statusEvent   *geolocation.TypedEventHandlerOfGeolocatorAndStatusChangedEventArgs   `exhaustruct:"optional"`
 
-	stopped bool `exhaustruct:"optional"`
+	// stopGuard runs the teardown exactly once and carries the joined stop
+	// error as its value, so the library never sees a failure to retry and
+	// every caller of Stop is handed the same outcome.
+	stopGuard *singleton.Provider[error] `exhaustruct:"optional"`
 }
 
 // New prepares a Backend. It does not start the provider; Start does.
 func New(opts Options, sink provider.Sink) (*Backend, error) {
-	return &Backend{opts: opts, sink: sink}, nil
+	backend := &Backend{opts: opts, sink: sink}
+	// The teardown must never retry, back off, or time out, so the guard runs
+	// at most one attempt with no deadline, and returns the stop error as its
+	// value rather than as a failure the library would retry.
+	backend.stopGuard = singleton.MustNew(
+		func(context.Context) (error, error) { return backend.teardown(), nil },
+		singleton.WithMaxAttempts(1),
+		singleton.WithInitializationTimeout(0),
+	)
+
+	return backend, nil
 }
 
 var _ provider.Provider = (*Backend)(nil)
@@ -212,14 +226,20 @@ func (b *Backend) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the session. It is idempotent and safe before or after Start.
+// Stop ends the session. It is safe before or after Start: the stop guard runs
+// the teardown once and hands the same joined stop error to every later call.
 func (b *Backend) Stop() error {
+	// The value is teardown's own joined-and-wrapped stop error; the second
+	// result is the guard's initialization error, which this guard never emits.
+	stopErr, _ := b.stopGuard.Get(context.Background())
+
+	return stopErr //nolint:wrapcheck // the value is teardown's own wrapped stop error
+}
+
+// teardown is the stop guard's factory: it detaches the handlers and releases
+// the Geolocator, returning whatever the removals reported.
+func (b *Backend) teardown() error {
 	b.mu.Lock()
-	if b.stopped {
-		b.mu.Unlock()
-		return nil
-	}
-	b.stopped = true
 	locator := b.locator
 	positionToken := b.positionToken
 	statusToken := b.statusToken

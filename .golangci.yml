@@ -14,9 +14,11 @@ linters:
           allow:
             - $gostd
             - github.com/mostafakhairy0305-dot/golocation
-            # The only third-party dependency: the CoreLocation backend calls
-            # into Objective-C through it.
+            # The CoreLocation backend calls into Objective-C through purego.
             - github.com/ebitengine/purego
+            # Lazy, retryable process-local singletons: owns the once-only
+            # close and stop guards in the core Service and the native adapters.
+            - github.com/mostafakhairy0305-dot/singleton
           deny:
             - pkg: math/rand
               desc: use math/rand/v2

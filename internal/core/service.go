@@ -8,7 +8,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/mostafakhairy0305-dot/golocation/internal/feature/lifecycle/adapter/atomicstate"
 	lifecycle "github.com/mostafakhairy0305-dot/golocation/internal/feature/lifecycle/port"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/singleton"
 )
 
 // Options is what the core needs to run. It is deliberately narrower than the
@@ -117,8 +117,12 @@ type Service struct {
 	capabilities geo.Capabilities  `exhaustruct:"optional"`
 
 	// Zero values are the usable ones.
-	closed    atomic.Bool `exhaustruct:"optional"`
-	closeOnce sync.Once   `exhaustruct:"optional"`
+	closed atomic.Bool `exhaustruct:"optional"`
+	// closeGuard runs the teardown exactly once and carries the provider's stop
+	// error as its value, so the library never sees a failure to retry and
+	// every caller of Close is handed the same outcome. Built in New, per
+	// Service — a package-level guard would share one teardown across Services.
+	closeGuard *singleton.Provider[error] `exhaustruct:"optional"`
 }
 
 var _ provider.Host = (*Service)(nil)
@@ -129,7 +133,7 @@ var _ provider.Host = (*Service)(nil)
 func New(opts Options, features Features) *Service {
 	features = features.withDefaults(opts)
 
-	return &Service{
+	service := &Service{
 		maximumAge:           opts.MaximumAge,
 		defaultChannelBuffer: opts.DefaultChannelBuffer,
 		defaultDropPolicy:    opts.DefaultDropPolicy,
@@ -139,6 +143,17 @@ func New(opts Options, features Features) *Service {
 		lifecycle:            features.Lifecycle,
 		clock:                features.Clock,
 	}
+	// The teardown must never retry, back off, or time out, so the guard runs
+	// at most one attempt with no deadline. It returns the stop error as its
+	// value — not as a failure — so the library caches a success and hands the
+	// same outcome to every later Close.
+	service.closeGuard = singleton.MustNew(
+		service.teardown,
+		singleton.WithMaxAttempts(1),
+		singleton.WithInitializationTimeout(0),
+	)
+
+	return service
 }
 
 // Attach binds the provider whose fixes this Service publishes. It must be
@@ -265,27 +280,16 @@ func (s *Service) Status() geo.Status { return s.lifecycle.Get() }
 // It is fixed at Attach, so it is safe to call from any goroutine.
 func (s *Service) Capabilities() geo.Capabilities { return s.capabilities }
 
-// Close stops the provider and tears down every subscription. It is idempotent
-// and returns the provider's stop error, if any.
+// Close stops the provider and tears down every subscription. The teardown runs
+// exactly once; Close reports the provider's stop error, if any, on every call
+// rather than only to the first caller.
 func (s *Service) Close() error {
-	var stopErr error
+	// The value is the provider's own stop error, already wrapped in teardown;
+	// the second result is the guard's initialization error, which this guard
+	// never produces.
+	stopErr, _ := s.closeGuard.Get(context.Background())
 
-	s.closeOnce.Do(func() {
-		s.closed.Store(true)
-
-		if s.native != nil {
-			err := s.native.Stop()
-			if err != nil {
-				stopErr = fmt.Errorf("stop the %s provider: %w", s.platform, err)
-			}
-		}
-		// The tracker carries the permission forward, so the closing status
-		// still reports whatever access the session had.
-		s.PublishStatus(geo.Status{State: geo.StateClosed, Message: "closed"})
-		s.hub.Close()
-	})
-
-	return stopErr
+	return stopErr //nolint:wrapcheck // the value is teardown's own wrapped stop error
 }
 
 // PublishFix admits a provider sample and fans it out. It is the adapter's
@@ -354,6 +358,29 @@ func (s *Service) PublishStatus(status geo.Status) {
 	if recorded, changed := s.lifecycle.Set(status); changed {
 		s.hub.BroadcastStatus(recorded)
 	}
+}
+
+// teardown is the close guard's factory: it stops the provider, publishes the
+// closing status, and closes the hub, then returns the provider's stop error as
+// its value. Returning the error as a value rather than as a factory failure is
+// what stops the library retrying — the teardown must run once and stay run.
+func (s *Service) teardown(context.Context) (error, error) {
+	s.closed.Store(true)
+
+	var stopErr error
+
+	if s.native != nil {
+		err := s.native.Stop()
+		if err != nil {
+			stopErr = fmt.Errorf("stop the %s provider: %w", s.platform, err)
+		}
+	}
+	// The tracker carries the permission forward, so the closing status still
+	// reports whatever access the session had.
+	s.PublishStatus(geo.Status{State: geo.StateClosed, Message: "closed"})
+	s.hub.Close()
+
+	return stopErr, nil
 }
 
 // checkReady rejects the two conditions every entry point shares: a nil

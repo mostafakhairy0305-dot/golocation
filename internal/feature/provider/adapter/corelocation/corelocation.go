@@ -17,6 +17,7 @@ import (
 	"github.com/ebitengine/purego/objc"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/singleton"
 )
 
 const platform = "darwin"
@@ -69,9 +70,13 @@ type Backend struct {
 	class  objc.Class
 	queues delegateQueues
 
-	stopOnce sync.Once      `exhaustruct:"optional"`
-	stopCh   chan struct{}  `exhaustruct:"optional"`
-	wg       sync.WaitGroup `exhaustruct:"optional"`
+	// stopGuard runs the teardown — closing stopCh — exactly once, however
+	// many times Start's cancel branch and Stop race to trigger it. It is
+	// per-instance because a package-level guard would share one teardown
+	// across every Backend.
+	stopGuard *singleton.Provider[struct{}] `exhaustruct:"optional"`
+	stopCh    chan struct{}                 `exhaustruct:"optional"`
+	wg        sync.WaitGroup                `exhaustruct:"optional"`
 
 	// Owned by the CoreLocation manager; populated on Start.
 	mu       sync.Mutex `exhaustruct:"optional"`
@@ -210,14 +215,27 @@ func New(opts Options, sink provider.Sink) (*Backend, error) {
 		return nil, geo.Wrap(platform, "register CoreLocation delegate", err, false)
 	}
 
-	return &Backend{
+	backend := &Backend{
 		opts:   opts,
 		sink:   sink,
 		sel:    selectors(),
 		class:  class,
 		queues: queuesOf(class),
 		stopCh: make(chan struct{}),
-	}, nil
+	}
+	// The teardown must never retry, back off, or time out — it only closes a
+	// channel — so the guard runs at most one attempt with no deadline.
+	backend.stopGuard = singleton.MustNew(
+		func(context.Context) (struct{}, error) {
+			close(backend.stopCh)
+
+			return struct{}{}, nil
+		},
+		singleton.WithMaxAttempts(1),
+		singleton.WithInitializationTimeout(0),
+	)
+
+	return backend, nil
 }
 
 // Platform names this adapter for error annotation.
@@ -246,16 +264,20 @@ func (b *Backend) Start(ctx context.Context) error {
 	case err := <-ready:
 		return err
 	case <-ctx.Done():
-		b.stopOnce.Do(func() { close(b.stopCh) })
+		// ctx is already done; the guard's teardown must still run, so it gets a
+		// context derived from ctx but stripped of the cancellation.
+		_, _ = b.stopGuard.Get(context.WithoutCancel(ctx))
 		b.wg.Wait()
 
 		return geo.Wrap(platform, "start CoreLocation", ctx.Err(), true)
 	}
 }
 
-// Stop ends the session. It is idempotent and safe before or after Start.
+// Stop ends the session. It is safe before or after Start: the stop guard
+// closes stopCh at most once however many times Stop and Start's cancel branch
+// race to trigger it.
 func (b *Backend) Stop() error {
-	b.stopOnce.Do(func() { close(b.stopCh) })
+	_, _ = b.stopGuard.Get(context.Background())
 	b.wg.Wait()
 
 	return nil
