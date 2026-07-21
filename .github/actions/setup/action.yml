@@ -1,15 +1,7 @@
 ---
 name: Setup Go project
 description: Install Go and Task, then prepare project dependencies.
-inputs:
-  download-modules:
-    description: Download Go modules before running project tasks.
-    required: false
-    default: 'false'
-  generate-proto:
-    description: Generate protobuf code after setup.
-    required: false
-    default: 'true'
+
 runs:
   using: composite
   steps:

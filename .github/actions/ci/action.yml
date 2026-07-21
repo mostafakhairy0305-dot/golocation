@@ -6,8 +6,6 @@ runs:
   steps:
     - name: Prepare Go project
       uses: ./.github/actions/setup
-      with:
-        generate-proto: 'true'
     - name: Run CI
       shell: bash
       run: task ci
