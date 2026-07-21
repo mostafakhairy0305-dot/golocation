@@ -14,13 +14,29 @@ func TestHasReportsOnlyTheFieldsActuallySet(t *testing.T) {
 		field  Field
 		want   bool
 	}{
-		"none set":              {fields: 0, field: FieldAltitude, want: false},
-		"the one set":           {fields: FieldAltitude, field: FieldAltitude, want: true},
-		"a different one set":   {fields: FieldAltitude, field: FieldSpeed, want: false},
-		"one of several":        {fields: FieldAltitude | FieldSpeed, field: FieldSpeed, want: true},
-		"absent among several":  {fields: FieldAltitude | FieldSpeed, field: FieldHeading, want: false},
-		"vertical accuracy set": {fields: FieldVerticalAccuracy, field: FieldVerticalAccuracy, want: true},
-		"all set":               {fields: FieldAltitude | FieldVerticalAccuracy | FieldSpeed | FieldHeading, field: FieldHeading, want: true},
+		"none set":            {fields: 0, field: FieldAltitude, want: false},
+		"the one set":         {fields: FieldAltitude, field: FieldAltitude, want: true},
+		"a different one set": {fields: FieldAltitude, field: FieldSpeed, want: false},
+		"one of several": {
+			fields: FieldAltitude | FieldSpeed,
+			field:  FieldSpeed,
+			want:   true,
+		},
+		"absent among several": {
+			fields: FieldAltitude | FieldSpeed,
+			field:  FieldHeading,
+			want:   false,
+		},
+		"vertical accuracy set": {
+			fields: FieldVerticalAccuracy,
+			field:  FieldVerticalAccuracy,
+			want:   true,
+		},
+		"all set": {
+			fields: FieldAltitude | FieldVerticalAccuracy | FieldSpeed | FieldHeading,
+			field:  FieldHeading,
+			want:   true,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -37,6 +53,7 @@ func TestHasReportsOnlyTheFieldsActuallySet(t *testing.T) {
 // much future to tolerate.
 func TestAgeIsSignedRelativeToNow(t *testing.T) {
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
+
 	cases := map[string]struct {
 		stamp time.Time
 		want  time.Duration

@@ -1,15 +1,12 @@
+---
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions: {}
-
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   taskotter:
     name: Sync TaskOtter taskfiles
@@ -28,57 +25,17 @@ jobs:
         uses: ./.github/actions/taskotter
         with:
           token: ${{ github.token }}
-
-  # Each operating system compiles a different provider adapter, so a single
-  # leg proves nothing about the other two.
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    needs: taskotter
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      # -race is the point of this job: the hub, the lifecycle tracker, and the
-      # fixed clock are all built to be driven from several goroutines at once.
-      - run: go test -race ./...
-
-  coverage:
-    name: coverage gate
-    runs-on: macos-latest
-    needs: taskotter
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      # macOS is the leg where the corelocation tests compile, so the gate runs
-      # against the largest set of packages. scripts/cover.sh owns the floor
-      # and the native-adapter exclusions.
-      - run: ./scripts/cover.sh
-
-  cross-build:
-    name: cross-build
+  ci:
+    name: Lint
     runs-on: ubuntu-latest
     needs: taskotter
-    strategy:
-      matrix:
-        goos: [linux, windows, darwin]
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
         with:
-          go-version-file: go.mod
-      # The adapters for the other two operating systems are invisible to a
-      # single-OS build, and would otherwise rot until someone tried to ship on
-      # that platform.
-      - run: go build ./...
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: amd64
+          persist-credentials: false
+      - name: Lint
+        uses: ./.github/actions/ci

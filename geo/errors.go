@@ -6,9 +6,11 @@ import (
 )
 
 var (
-	ErrInvalidConfig       = errors.New("invalid location configuration")
-	ErrPermissionDenied    = errors.New("location permission denied")
-	ErrPermissionNeeded    = errors.New("location permission must be requested by the host application")
+	ErrInvalidConfig    = errors.New("invalid location configuration")
+	ErrPermissionDenied = errors.New("location permission denied")
+	ErrPermissionNeeded = errors.New(
+		"location permission must be requested by the host application",
+	)
 	ErrServiceDisabled     = errors.New("location service disabled")
 	ErrServiceUnavailable  = errors.New("location service unavailable")
 	ErrPositionUnavailable = errors.New("position unavailable")
@@ -29,9 +31,11 @@ func (e *Error) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
+
 	if e.Platform == "" {
 		return fmt.Sprintf("location %s: %v", e.Op, e.Err)
 	}
+
 	return fmt.Sprintf("location %s (%s): %v", e.Op, e.Platform, e.Err)
 }
 
@@ -43,5 +47,6 @@ func Wrap(platform, op string, err error, temporary bool) error {
 	if err == nil {
 		return nil
 	}
+
 	return &Error{Op: op, Platform: platform, Temporary: temporary, Err: err}
 }

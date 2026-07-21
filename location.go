@@ -19,10 +19,16 @@ func Open(ctx context.Context, config Config) (Locator, error) {
 // to ask, and which feature adapters to run on. Open supplies the real ones;
 // a test supplies fakes, which is the only way to exercise start-up without a
 // live location service.
-func open(ctx context.Context, config Config, factory provider.Factory, features core.Features) (Locator, error) {
+func open(
+	ctx context.Context,
+	config Config,
+	factory provider.Factory,
+	features core.Features,
+) (Locator, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%w: nil context", geo.ErrInvalidConfig)
 	}
+
 	cfg, err := normalizeConfig(config)
 	if err != nil {
 		return nil, err
@@ -54,9 +60,11 @@ func open(ctx context.Context, config Config, factory provider.Factory, features
 	if err != nil {
 		return nil, err
 	}
+
 	service.Attach(native)
 
 	startCtx := ctx
+
 	cancel := func() {}
 	if cfg.StartTimeout > 0 {
 		startCtx, cancel = context.WithTimeout(ctx, cfg.StartTimeout)
@@ -68,6 +76,7 @@ func open(ctx context.Context, config Config, factory provider.Factory, features
 		// hand-rolled subset that drifts. It is safe here because closeOnce
 		// guards it and every adapter's Stop is idempotent.
 		_ = service.Close()
+
 		return nil, err
 	}
 

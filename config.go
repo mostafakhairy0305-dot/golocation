@@ -77,48 +77,83 @@ func normalizeConfig(in Config) (Config, error) {
 	if out.MinimumInterval == 0 {
 		out.MinimumInterval = defaults.MinimumInterval
 	}
+
 	if out.MaximumAge == 0 {
 		out.MaximumAge = defaults.MaximumAge
 	}
+
 	if out.StartTimeout == 0 {
 		out.StartTimeout = defaults.StartTimeout
 	}
+
 	if out.DefaultChannelBuffer == 0 {
 		out.DefaultChannelBuffer = defaults.DefaultChannelBuffer
 	}
+
 	if out.Linux.DesktopID == "" {
 		out.Linux.DesktopID = defaults.Linux.DesktopID
 	}
+
 	if out.Linux.ReconnectMin == 0 {
 		out.Linux.ReconnectMin = defaults.Linux.ReconnectMin
 	}
+
 	if out.Linux.ReconnectMax == 0 {
 		out.Linux.ReconnectMax = defaults.Linux.ReconnectMax
 	}
+
 	if out.Accuracy > AccuracyNavigation {
-		return Config{}, fmt.Errorf("%w: unknown accuracy value %d", geo.ErrInvalidConfig, out.Accuracy)
+		return Config{}, fmt.Errorf(
+			"%w: unknown accuracy value %d",
+			geo.ErrInvalidConfig,
+			out.Accuracy,
+		)
 	}
+
 	if out.Permission > PermissionDoNotRequest {
-		return Config{}, fmt.Errorf("%w: unknown permission mode %d", geo.ErrInvalidConfig, out.Permission)
+		return Config{}, fmt.Errorf(
+			"%w: unknown permission mode %d",
+			geo.ErrInvalidConfig,
+			out.Permission,
+		)
 	}
+
 	if out.DefaultDropPolicy == DropDefault {
 		out.DefaultDropPolicy = defaults.DefaultDropPolicy
 	}
+
 	if out.DefaultDropPolicy > DropNewest {
-		return Config{}, fmt.Errorf("%w: unknown drop policy %d", geo.ErrInvalidConfig, out.DefaultDropPolicy)
+		return Config{}, fmt.Errorf(
+			"%w: unknown drop policy %d",
+			geo.ErrInvalidConfig,
+			out.DefaultDropPolicy,
+		)
 	}
+
 	if out.MinimumInterval < 0 || out.MaximumAge < 0 || out.StartTimeout < 0 {
 		return Config{}, fmt.Errorf("%w: durations cannot be negative", geo.ErrInvalidConfig)
 	}
-	if math.IsNaN(out.MinimumDistanceMeters) || math.IsInf(out.MinimumDistanceMeters, 0) || out.MinimumDistanceMeters < 0 {
-		return Config{}, fmt.Errorf("%w: minimum distance must be finite and non-negative", geo.ErrInvalidConfig)
+
+	if math.IsNaN(out.MinimumDistanceMeters) || math.IsInf(out.MinimumDistanceMeters, 0) ||
+		out.MinimumDistanceMeters < 0 {
+		return Config{}, fmt.Errorf(
+			"%w: minimum distance must be finite and non-negative",
+			geo.ErrInvalidConfig,
+		)
 	}
+
 	if out.DefaultChannelBuffer < 1 {
-		return Config{}, fmt.Errorf("%w: default channel buffer must be at least 1", geo.ErrInvalidConfig)
+		return Config{}, fmt.Errorf(
+			"%w: default channel buffer must be at least 1",
+			geo.ErrInvalidConfig,
+		)
 	}
-	if out.Linux.ReconnectMin < 0 || out.Linux.ReconnectMax < 0 || out.Linux.ReconnectMax < out.Linux.ReconnectMin {
+
+	if out.Linux.ReconnectMin < 0 || out.Linux.ReconnectMax < 0 ||
+		out.Linux.ReconnectMax < out.Linux.ReconnectMin {
 		return Config{}, fmt.Errorf("%w: invalid Linux reconnect range", geo.ErrInvalidConfig)
 	}
+
 	if strings.TrimSpace(out.Linux.DesktopID) == "" {
 		return Config{}, fmt.Errorf("%w: Linux desktop ID cannot be empty", geo.ErrInvalidConfig)
 	}
@@ -137,10 +172,13 @@ func desktopIDFrom(executable string, err error) string {
 	if err != nil {
 		return "golocation"
 	}
+
 	name := filepath.Base(executable)
+
 	name = strings.TrimSuffix(name, filepath.Ext(name))
 	if name == "" {
 		return "golocation"
 	}
+
 	return name
 }

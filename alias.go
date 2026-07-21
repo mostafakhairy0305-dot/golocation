@@ -41,7 +41,7 @@ type Subscription = fanout.Subscription
 // SubscriptionConfig configures one independent real-time subscription:
 //
 //	Buffer       int         // per-channel capacity; 0 takes Config.DefaultChannelBuffer
-//	DropPolicy   DropPolicy  // behavior when a channel is full
+//	DropPolicy   // behavior when a channel is full
 //	ReplayLatest bool        // immediately send the most recent accepted fix, when present
 type SubscriptionConfig = fanout.SubscriptionConfig
 

@@ -1,0 +1,28 @@
+---
+name: Setup Go project
+description: Install Go and Task, then prepare project dependencies.
+inputs:
+  download-modules:
+    description: Download Go modules before running project tasks.
+    required: false
+    default: 'false'
+  generate-proto:
+    description: Generate protobuf code after setup.
+    required: false
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6
+      with:
+        go-version-file: go.mod
+        cache: true
+    - name: Setup Task
+      uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa  # v2
+    - name: Generate protobuf contracts
+      if: inputs.generate-proto == 'true'
+      shell: bash
+      env:
+        GO_MODULE: github.com/mostafazofirm/kernel
+      run: task proto:gen PROTO_PATH_OVERRIDE=contracts

@@ -11,6 +11,7 @@ import (
 
 func benchService(tb testing.TB) *Service {
 	tb.Helper()
+
 	service := New(Options{
 		MaximumAge:           time.Minute,
 		DefaultChannelBuffer: 1,
@@ -18,6 +19,7 @@ func benchService(tb testing.TB) *Service {
 	}, Features{})
 	service.Attach(&fakeProvider{platform: "bench"})
 	tb.Cleanup(func() { _ = service.Close() })
+
 	return service
 }
 
@@ -30,16 +32,20 @@ func BenchmarkNextRoundTrip(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		id, events, err := service.hub.AddOnce()
 		if err != nil {
 			b.Fatalf("AddOnce: %v", err)
 		}
+
 		service.hub.BroadcastFix(fix)
+
 		select {
 		case <-events:
 		case <-ctx.Done():
 		}
+
 		service.hub.RemoveOnce(id)
 	}
 }
@@ -51,12 +57,18 @@ func BenchmarkSubscriptionRoundTrip(b *testing.B) {
 	fix := geo.Fix{Latitude: 51.5, Longitude: -0.12, AccuracyMeters: 10}
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		ctx, cancel := context.WithCancel(context.Background())
-		sub, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest})
+
+		sub, err := service.Subscribe(
+			ctx,
+			fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		)
 		if err != nil {
 			b.Fatalf("Subscribe: %v", err)
 		}
+
 		service.hub.BroadcastFix(fix)
 		<-sub.Locations
 		cancel()
@@ -67,17 +79,25 @@ func BenchmarkSubscriptionRoundTrip(b *testing.B) {
 // subscriber, with readiness already announced.
 func BenchmarkPublishFix(b *testing.B) {
 	service := benchService(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
+	ctx := b.Context()
+
 	if _, err := service.Subscribe(ctx, fanout.SubscriptionConfig{Buffer: 1}); err != nil {
 		b.Fatalf("Subscribe: %v", err)
 	}
 
 	now := time.Now().UTC()
-	fix := geo.Fix{Timestamp: now, ReceivedAt: now, Latitude: 51.5, Longitude: -0.12, AccuracyMeters: 10}
+	fix := geo.Fix{
+		Timestamp:      now,
+		ReceivedAt:     now,
+		Latitude:       51.5,
+		Longitude:      -0.12,
+		AccuracyMeters: 10,
+	}
 	service.PublishFix(fix) // settle the status transition out of the measured loop
 
 	b.ReportAllocs()
+
 	for b.Loop() {
 		service.PublishFix(fix)
 	}
@@ -91,6 +111,7 @@ func BenchmarkStatus(b *testing.B) {
 		for pb.Next() {
 			status = service.Status()
 		}
+
 		if status.State == geo.StateClosed {
 			b.Fatal("unreachable, and only here so the loop is not optimized away")
 		}

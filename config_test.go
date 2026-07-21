@@ -28,18 +28,31 @@ func TestNormalizeConfigDefaultsEveryFieldIndependently(t *testing.T) {
 			if err != nil {
 				t.Fatalf("normalizeConfig: %v", err)
 			}
+
 			if out.MinimumInterval != defaults.MinimumInterval {
-				t.Errorf("MinimumInterval = %v, want %v", out.MinimumInterval, defaults.MinimumInterval)
+				t.Errorf(
+					"MinimumInterval = %v, want %v",
+					out.MinimumInterval,
+					defaults.MinimumInterval,
+				)
 			}
+
 			if out.MaximumAge != defaults.MaximumAge {
 				t.Errorf("MaximumAge = %v, want %v", out.MaximumAge, defaults.MaximumAge)
 			}
+
 			if out.StartTimeout != defaults.StartTimeout {
 				t.Errorf("StartTimeout = %v, want %v", out.StartTimeout, defaults.StartTimeout)
 			}
+
 			if out.DefaultDropPolicy != defaults.DefaultDropPolicy {
-				t.Errorf("DefaultDropPolicy = %v, want %v", out.DefaultDropPolicy, defaults.DefaultDropPolicy)
+				t.Errorf(
+					"DefaultDropPolicy = %v, want %v",
+					out.DefaultDropPolicy,
+					defaults.DefaultDropPolicy,
+				)
 			}
+
 			if out.Linux.DesktopID == "" {
 				t.Error("Linux.DesktopID is empty")
 			}
@@ -53,16 +66,20 @@ func TestNormalizeConfigKeepsExplicitValues(t *testing.T) {
 		MaximumAge:      time.Minute,
 		StartTimeout:    2 * time.Second,
 	}
+
 	out, err := normalizeConfig(in)
 	if err != nil {
 		t.Fatalf("normalizeConfig: %v", err)
 	}
+
 	if out.MinimumInterval != 5*time.Second {
 		t.Errorf("MinimumInterval = %v, want 5s", out.MinimumInterval)
 	}
+
 	if out.MaximumAge != time.Minute {
 		t.Errorf("MaximumAge = %v, want 1m", out.MaximumAge)
 	}
+
 	if out.StartTimeout != 2*time.Second {
 		t.Errorf("StartTimeout = %v, want 2s", out.StartTimeout)
 	}
@@ -80,7 +97,10 @@ func TestNormalizeConfigRejectsInvalid(t *testing.T) {
 		{"negative distance", Config{MinimumDistanceMeters: -1}},
 		{"negative buffer", Config{DefaultChannelBuffer: -1}},
 		{"blank desktop ID", Config{Linux: LinuxConfig{DesktopID: "   "}}},
-		{"inverted reconnect range", Config{Linux: LinuxConfig{ReconnectMin: time.Minute, ReconnectMax: time.Second}}},
+		{
+			"inverted reconnect range",
+			Config{Linux: LinuxConfig{ReconnectMin: time.Minute, ReconnectMax: time.Second}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -101,13 +121,19 @@ func TestDesktopIDAlwaysDerivesANonEmptyName(t *testing.T) {
 		err        error
 		want       string
 	}{
-		"a plain name":              {executable: "/usr/local/bin/myapp", want: "myapp"},
-		"an extension is dropped":   {executable: "/usr/local/bin/myapp.exe", want: "myapp"},
-		"no directory":              {executable: "myapp", want: "myapp"},
-		"the executable is unknown": {err: errors.New("readlink /proc/self/exe: no such file"), want: "golocation"},
+		"a plain name":            {executable: "/usr/local/bin/myapp", want: "myapp"},
+		"an extension is dropped": {executable: "/usr/local/bin/myapp.exe", want: "myapp"},
+		"no directory":            {executable: "myapp", want: "myapp"},
+		"the executable is unknown": {
+			err:  errors.New("readlink /proc/self/exe: no such file"),
+			want: "golocation",
+		},
 		// filepath.Ext of a dotfile is the whole name, so trimming it leaves
 		// nothing behind — the one input that reaches the second fallback.
-		"a dotfile leaves nothing behind": {executable: "/usr/local/bin/.myapp", want: "golocation"},
+		"a dotfile leaves nothing behind": {
+			executable: "/usr/local/bin/.myapp",
+			want:       "golocation",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -125,9 +151,11 @@ func TestTheDerivedDesktopIDIsAcceptedByNormalizeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeConfig: %v", err)
 	}
+
 	if out.Linux.DesktopID == "" {
 		t.Fatal("the defaulted desktop ID is empty")
 	}
+
 	if out.Linux.DesktopID != defaultDesktopID() {
 		t.Fatalf("DesktopID = %q, want the derived %q", out.Linux.DesktopID, defaultDesktopID())
 	}

@@ -32,7 +32,7 @@ runs:
         tasks: ${{ inputs.tasks }}
         js: ${{ inputs.js }}
         fail-on-changes: true
-        sync-root: true
+        sync-root: false
     - name: Print result
       if: always()
       shell: bash

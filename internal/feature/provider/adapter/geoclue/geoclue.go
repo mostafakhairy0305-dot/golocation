@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
@@ -126,7 +125,13 @@ func (b *backend) run(ready chan<- error) {
 			ready <- err
 			return
 		}
-		b.sink.PublishStatus(geo.Status{State: geo.StateReconnecting, Permission: geo.PermissionUnknown, Message: "waiting for GeoClue"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateReconnecting,
+				Permission: geo.PermissionUnknown,
+				Message:    "waiting for GeoClue",
+			},
+		)
 		if !sleepContext(b.ctx, backoff) {
 			return
 		}
@@ -146,11 +151,23 @@ func (b *backend) run(ready chan<- error) {
 		}
 		b.sink.PublishError(geo.Wrap(platform, "GeoClue connection", err, true))
 		if !b.opts.Reconnect {
-			b.sink.PublishStatus(geo.Status{State: geo.StateUnavailable, Permission: geo.PermissionUnknown, Message: "GeoClue connection lost"})
+			b.sink.PublishStatus(
+				geo.Status{
+					State:      geo.StateUnavailable,
+					Permission: geo.PermissionUnknown,
+					Message:    "GeoClue connection lost",
+				},
+			)
 			return
 		}
 
-		b.sink.PublishStatus(geo.Status{State: geo.StateReconnecting, Permission: geo.PermissionUnknown, Message: "reconnecting to GeoClue"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateReconnecting,
+				Permission: geo.PermissionUnknown,
+				Message:    "reconnecting to GeoClue",
+			},
+		)
 		for {
 			if !sleepContext(b.ctx, backoff) {
 				return
@@ -161,7 +178,13 @@ func (b *backend) run(ready chan<- error) {
 				break
 			}
 			if errors.Is(err, geo.ErrPermissionDenied) {
-				b.sink.PublishStatus(geo.Status{State: geo.StateDisabled, Permission: geo.PermissionDenied, Message: "GeoClue access denied"})
+				b.sink.PublishStatus(
+					geo.Status{
+						State:      geo.StateDisabled,
+						Permission: geo.PermissionDenied,
+						Message:    "GeoClue access denied",
+					},
+				)
 				b.sink.PublishError(err)
 				return
 			}
@@ -177,7 +200,12 @@ func (b *backend) run(ready chan<- error) {
 func (b *backend) connect(ctx context.Context) (*session, error) {
 	conn, err := dbus.SystemBusPrivate()
 	if err != nil {
-		return nil, geo.Wrap(platform, "connect system bus", errors.Join(geo.ErrServiceUnavailable, err), true)
+		return nil, geo.Wrap(
+			platform,
+			"connect system bus",
+			errors.Join(geo.ErrServiceUnavailable, err),
+			true,
+		)
 	}
 	closeOnError := true
 	defer func() {
@@ -195,7 +223,8 @@ func (b *backend) connect(ctx context.Context) (*session, error) {
 
 	manager := conn.Object(geoClueService, geoClueManagerPath)
 	var clientPath dbus.ObjectPath
-	if err := manager.CallWithContext(ctx, geoClueManagerIFace+".GetClient", 0).Store(&clientPath); err != nil {
+	if err := manager.CallWithContext(ctx, geoClueManagerIFace+".GetClient", 0).
+		Store(&clientPath); err != nil {
 		return nil, mapGeoClueError("get client", err)
 	}
 	if !clientPath.IsValid() {
@@ -203,15 +232,33 @@ func (b *backend) connect(ctx context.Context) (*session, error) {
 	}
 
 	client := conn.Object(geoClueService, clientPath)
-	if err := setDBusProperty(ctx, client, geoClueClientIFace, "DesktopId", b.opts.DesktopID); err != nil {
+	if err := setDBusProperty(
+		ctx,
+		client,
+		geoClueClientIFace,
+		"DesktopId",
+		b.opts.DesktopID,
+	); err != nil {
 		return nil, mapGeoClueError("set desktop ID", err)
 	}
-	if err := setDBusProperty(ctx, client, geoClueClientIFace, "RequestedAccuracyLevel", geoClueAccuracy(b.opts)); err != nil {
+	if err := setDBusProperty(
+		ctx,
+		client,
+		geoClueClientIFace,
+		"RequestedAccuracyLevel",
+		geoClueAccuracy(b.opts),
+	); err != nil {
 		return nil, mapGeoClueError("set accuracy", err)
 	}
 	if b.opts.MinimumDistanceMeters > 0 {
 		distance := uint32(math.Ceil(b.opts.MinimumDistanceMeters))
-		if err := setDBusProperty(ctx, client, geoClueClientIFace, "DistanceThreshold", distance); err != nil {
+		if err := setDBusProperty(
+			ctx,
+			client,
+			geoClueClientIFace,
+			"DistanceThreshold",
+			distance,
+		); err != nil {
 			return nil, mapGeoClueError("set distance threshold", err)
 		}
 	}
@@ -220,7 +267,13 @@ func (b *backend) connect(ctx context.Context) (*session, error) {
 		if seconds == 0 {
 			seconds = 1
 		}
-		if err := setDBusProperty(ctx, client, geoClueClientIFace, "TimeThreshold", seconds); err != nil {
+		if err := setDBusProperty(
+			ctx,
+			client,
+			geoClueClientIFace,
+			"TimeThreshold",
+			seconds,
+		); err != nil {
 			return nil, mapGeoClueError("set time threshold", err)
 		}
 	}
@@ -248,9 +301,16 @@ func (b *backend) connect(ctx context.Context) (*session, error) {
 	b.mu.Unlock()
 	closeOnError = false
 
-	b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: geo.PermissionGranted, Message: "GeoClue started"})
+	b.sink.PublishStatus(
+		geo.Status{
+			State:      geo.StateStarting,
+			Permission: geo.PermissionGranted,
+			Message:    "GeoClue started",
+		},
+	)
 	if variant, err := client.GetProperty(geoClueClientIFace + ".Location"); err == nil {
-		if locationPath, ok := variant.Value().(dbus.ObjectPath); ok && locationPath.IsValid() && locationPath != "/" {
+		if locationPath, ok := variant.Value().(dbus.ObjectPath); ok && locationPath.IsValid() &&
+			locationPath != "/" {
 			if fix, readErr := current.readLocation(ctx, locationPath); readErr == nil {
 				b.sink.PublishFix(fix)
 			}
@@ -271,7 +331,8 @@ func (s *session) run(ctx context.Context) error {
 			if !ok {
 				return geo.ErrServiceUnavailable
 			}
-			if signal == nil || signal.Name != geoClueClientIFace+".LocationUpdated" || len(signal.Body) < 2 {
+			if signal == nil || signal.Name != geoClueClientIFace+".LocationUpdated" ||
+				len(signal.Body) < 2 {
 				continue
 			}
 			path, ok := signal.Body[1].(dbus.ObjectPath)
@@ -286,7 +347,11 @@ func (s *session) run(ctx context.Context) error {
 			s.backend.sink.PublishFix(fix)
 		case <-ping.C:
 			peer := s.conn.Object(geoClueService, s.clientPath)
-			if err := peer.CallWithContext(ctx, "org.freedesktop.DBus.Peer.Ping", 0).Err; err != nil {
+			if err := peer.CallWithContext(
+				ctx,
+				"org.freedesktop.DBus.Peer.Ping",
+				0,
+			).Err; err != nil {
 				return err
 			}
 		}
@@ -296,7 +361,8 @@ func (s *session) run(ctx context.Context) error {
 func (s *session) readLocation(ctx context.Context, path dbus.ObjectPath) (geo.Fix, error) {
 	var props map[string]dbus.Variant
 	obj := s.conn.Object(geoClueService, path)
-	if err := obj.CallWithContext(ctx, propertiesIFace+".GetAll", 0, geoClueLocationIFace).Store(&props); err != nil {
+	if err := obj.CallWithContext(ctx, propertiesIFace+".GetAll", 0, geoClueLocationIFace).
+		Store(&props); err != nil {
 		return geo.Fix{}, mapGeoClueError("read location", err)
 	}
 
@@ -344,8 +410,20 @@ func (s *session) close() {
 	s.backend.mu.Unlock()
 }
 
-func setDBusProperty(ctx context.Context, object dbus.BusObject, iface, name string, value any) error {
-	return object.CallWithContext(ctx, propertiesIFace+".Set", 0, iface, name, dbus.MakeVariant(value)).Err
+func setDBusProperty(
+	ctx context.Context,
+	object dbus.BusObject,
+	iface, name string,
+	value any,
+) error {
+	return object.CallWithContext(
+		ctx,
+		propertiesIFace+".Set",
+		0,
+		iface,
+		name,
+		dbus.MakeVariant(value),
+	).Err
 }
 
 func geoClueAccuracy(opts Options) uint32 {
@@ -424,9 +502,11 @@ func mapGeoClueError(op string, err error) error {
 	var dbusErr *dbus.Error
 	if errors.As(err, &dbusErr) {
 		switch dbusErr.Name {
-		case "org.freedesktop.DBus.Error.AccessDenied", "org.freedesktop.GeoClue2.Error.NotAuthorized":
+		case "org.freedesktop.DBus.Error.AccessDenied",
+			"org.freedesktop.GeoClue2.Error.NotAuthorized":
 			return geo.Wrap(platform, op, errors.Join(geo.ErrPermissionDenied, err), false)
-		case "org.freedesktop.DBus.Error.ServiceUnknown", "org.freedesktop.DBus.Error.NameHasNoOwner":
+		case "org.freedesktop.DBus.Error.ServiceUnknown",
+			"org.freedesktop.DBus.Error.NameHasNoOwner":
 			return geo.Wrap(platform, op, errors.Join(geo.ErrServiceUnavailable, err), true)
 		}
 	}

@@ -42,24 +42,30 @@ func TestFactoryFuncForwardsBothArgumentsAndBothResults(t *testing.T) {
 	wantProvider := stubProvider{}
 	wantErr := errors.New("factory failed")
 
-	var gotOpts Options
-	var gotSink Sink
-	var factory Factory = FactoryFunc(func(opts Options, sink Sink) (Provider, error) {
-		gotOpts, gotSink = opts, sink
-		return wantProvider, wantErr
-	})
+	var (
+		gotOpts Options
+		gotSink Sink
+		factory Factory = FactoryFunc(func(opts Options, sink Sink) (Provider, error) {
+			gotOpts, gotSink = opts, sink
+
+			return wantProvider, wantErr
+		})
+	)
 
 	provider, err := factory.New(wantOpts, wantSink)
 
 	if gotOpts != wantOpts {
 		t.Errorf("Options = %+v, want %+v", gotOpts, wantOpts)
 	}
+
 	if gotSink != Sink(wantSink) {
 		t.Errorf("Sink = %v, want %v", gotSink, wantSink)
 	}
+
 	if provider != Provider(wantProvider) {
 		t.Errorf("Provider = %v, want %v", provider, wantProvider)
 	}
+
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error = %v, want %v", err, wantErr)
 	}

@@ -16,6 +16,7 @@ func TestNowIsTheWallClockInUTC(t *testing.T) {
 	if got.Location() != time.UTC {
 		t.Fatalf("Location = %v, want UTC", got.Location())
 	}
+
 	if got.Before(before) || got.After(after) {
 		t.Fatalf("Now = %v, want between %v and %v", got, before, after)
 	}

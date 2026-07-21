@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ebitengine/purego/objc"
-
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
@@ -37,7 +36,9 @@ var (
 	selArray                     = objc.RegisterName("array")
 	selDateWithTimeInterval1970  = objc.RegisterName("dateWithTimeIntervalSince1970:")
 	selInitWithLatitudeLongitude = objc.RegisterName("initWithLatitude:longitude:")
-	selInitWithCoordinateFull    = objc.RegisterName("initWithCoordinate:altitude:horizontalAccuracy:verticalAccuracy:course:speed:timestamp:")
+	selInitWithCoordinateFull    = objc.RegisterName(
+		"initWithCoordinate:altitude:horizontalAccuracy:verticalAccuracy:course:speed:timestamp:",
+	)
 )
 
 // withLoadedCoreLocation prepares the ObjC side the same way New does, and
@@ -45,9 +46,12 @@ var (
 // temporaries do not warn about having nowhere to go.
 func withLoadedCoreLocation(t *testing.T) {
 	t.Helper()
-	if err := loadCoreLocation(); err != nil {
+
+	err := loadCoreLocation()
+	if err != nil {
 		t.Fatalf("loadCoreLocation: %v", err)
 	}
+
 	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(selNew)
 	if pool != 0 {
 		t.Cleanup(func() { pool.Send(selDrain) })
@@ -58,24 +62,29 @@ func withLoadedCoreLocation(t *testing.T) {
 // is the precondition every callback checks before it publishes anything.
 func registerDelegate(t *testing.T, b *backend) objc.ID {
 	t.Helper()
+
 	self := objc.ID(objc.GetClass("NSObject")).Send(selNew)
 	if self == 0 {
 		t.Fatal("could not allocate an NSObject to stand in for the delegate")
 	}
+
 	coreLocationDelegates.Store(self, b)
 	t.Cleanup(func() {
 		coreLocationDelegates.Delete(self)
 		self.Send(selRelease)
 	})
+
 	return self
 }
 
 func nsString(t *testing.T, s string) objc.ID {
 	t.Helper()
+
 	value := objc.ID(objc.GetClass("NSString")).Send(selStringWithUTF8String, s)
 	if value == 0 {
 		t.Fatalf("could not build an NSString from %q", s)
 	}
+
 	return value
 }
 
@@ -114,6 +123,7 @@ func TestCoreLocationAccuracyMapsEveryPreference(t *testing.T) {
 // not wait on a run loop that was never entered.
 func TestNewPreparesAProviderWithoutStartingOrPrompting(t *testing.T) {
 	sink := &fakeSink{}
+
 	native, err := New(Options{Permission: provider.PermissionDoNotRequest}, sink)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -122,6 +132,7 @@ func TestNewPreparesAProviderWithoutStartingOrPrompting(t *testing.T) {
 	if got := native.Platform(); got != "darwin" {
 		t.Errorf("Platform = %q, want %q", got, "darwin")
 	}
+
 	want := geo.Capabilities{Altitude: true, VerticalAccuracy: true, Speed: true, Heading: true}
 	if got := native.Capabilities(); got != want {
 		t.Errorf("Capabilities = %+v, want %+v", got, want)
@@ -130,6 +141,7 @@ func TestNewPreparesAProviderWithoutStartingOrPrompting(t *testing.T) {
 	if err := native.Stop(); err != nil {
 		t.Fatalf("Stop before Start: %v", err)
 	}
+
 	if err := native.Stop(); err != nil {
 		t.Fatalf("second Stop: %v", err)
 	}
@@ -153,12 +165,38 @@ func TestPublishAuthorizationMapsEveryStatus(t *testing.T) {
 		wantPermission geo.PermissionState
 		wantErr        bool
 	}{
-		"not determined":          {status: 0, wantState: geo.StateStarting, wantPermission: geo.PermissionPromptRequired},
-		"restricted":              {status: 1, wantState: geo.StateDisabled, wantPermission: geo.PermissionRestricted, wantErr: true},
-		"denied":                  {status: 2, wantState: geo.StateDisabled, wantPermission: geo.PermissionDenied, wantErr: true},
-		"authorized always":       {status: 3, wantState: geo.StateStarting, wantPermission: geo.PermissionGranted},
-		"authorized when in use":  {status: 4, wantState: geo.StateStarting, wantPermission: geo.PermissionGranted},
-		"a status we do not know": {status: 99, wantState: geo.StateUnavailable, wantPermission: geo.PermissionUnknown},
+		"not determined": {
+			status:         0,
+			wantState:      geo.StateStarting,
+			wantPermission: geo.PermissionPromptRequired,
+		},
+		"restricted": {
+			status:         1,
+			wantState:      geo.StateDisabled,
+			wantPermission: geo.PermissionRestricted,
+			wantErr:        true,
+		},
+		"denied": {
+			status:         2,
+			wantState:      geo.StateDisabled,
+			wantPermission: geo.PermissionDenied,
+			wantErr:        true,
+		},
+		"authorized always": {
+			status:         3,
+			wantState:      geo.StateStarting,
+			wantPermission: geo.PermissionGranted,
+		},
+		"authorized when in use": {
+			status:         4,
+			wantState:      geo.StateStarting,
+			wantPermission: geo.PermissionGranted,
+		},
+		"a status we do not know": {
+			status:         99,
+			wantState:      geo.StateUnavailable,
+			wantPermission: geo.PermissionUnknown,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -170,13 +208,16 @@ func TestPublishAuthorizationMapsEveryStatus(t *testing.T) {
 			if len(sink.statuses) != 1 {
 				t.Fatalf("published %d statuses, want 1", len(sink.statuses))
 			}
+
 			got := sink.statuses[0]
 			if got.State != tc.wantState {
 				t.Errorf("state = %v, want %v", got.State, tc.wantState)
 			}
+
 			if got.Permission != tc.wantPermission {
 				t.Errorf("permission = %v, want %v", got.Permission, tc.wantPermission)
 			}
+
 			if got.Message == "" {
 				t.Error("status carries no message")
 			}
@@ -199,6 +240,7 @@ func TestPublishAuthorizationMapsEveryStatus(t *testing.T) {
 // keeps that from dereferencing nil on an OS callback thread.
 func TestCallbacksIgnoreADelegateThatIsNoLongerRegistered(t *testing.T) {
 	withLoadedCoreLocation(t)
+
 	sink := &fakeSink{}
 	// Registered, then dropped — exactly the state a torn-down run leaves.
 	self := registerDelegate(t, &backend{sink: sink})
@@ -247,6 +289,7 @@ func TestDidFailMapsTheCoreLocationErrorCode(t *testing.T) {
 			if len(sink.errs) != 1 {
 				t.Fatalf("published %d errors, want 1", len(sink.errs))
 			}
+
 			err := sink.errs[0]
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Errorf("error = %v, want %v", err, tc.wantErr)
@@ -261,6 +304,7 @@ func TestDidFailMapsTheCoreLocationErrorCode(t *testing.T) {
 			if !errors.As(err, &annotated) {
 				t.Fatalf("error = %v, want a *geo.Error", err)
 			}
+
 			if annotated.Platform != platform {
 				t.Errorf("platform = %q, want %q", annotated.Platform, platform)
 			}
@@ -289,7 +333,9 @@ func TestDidUpdateLocationsMapsTheOptionalFields(t *testing.T) {
 	withLoadedCoreLocation(t)
 
 	stamp := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
-	date := objc.ID(objc.GetClass("NSDate")).Send(selDateWithTimeInterval1970, float64(stamp.Unix()))
+
+	date := objc.ID(objc.GetClass("NSDate")).
+		Send(selDateWithTimeInterval1970, float64(stamp.Unix()))
 	if date == 0 {
 		t.Fatal("could not build an NSDate")
 	}
@@ -350,6 +396,7 @@ func TestDidUpdateLocationsMapsTheOptionalFields(t *testing.T) {
 				t.Fatal("could not build a CLLocation")
 			}
 			defer location.Send(selRelease)
+
 			locations := objc.ID(objc.GetClass("NSArray")).Send(selArrayWithObject, location)
 
 			coreLocationDidUpdateLocations(self, 0, 0, locations)
@@ -357,46 +404,88 @@ func TestDidUpdateLocationsMapsTheOptionalFields(t *testing.T) {
 			if len(sink.fixes) != 1 {
 				t.Fatalf("published %d fixes, want 1", len(sink.fixes))
 			}
+
 			got := sink.fixes[0]
 
 			if got.Latitude != tc.want.Latitude || got.Longitude != tc.want.Longitude {
-				t.Errorf("coordinate = %v,%v want %v,%v", got.Latitude, got.Longitude, tc.want.Latitude, tc.want.Longitude)
+				t.Errorf(
+					"coordinate = %v,%v want %v,%v",
+					got.Latitude,
+					got.Longitude,
+					tc.want.Latitude,
+					tc.want.Longitude,
+				)
 			}
+
 			if got.Fields != tc.want.Fields {
 				t.Errorf("Fields = %b, want %b", got.Fields, tc.want.Fields)
 			}
+
 			if got.Source != geo.SourceSystem {
 				t.Errorf("Source = %v, want SourceSystem", got.Source)
 			}
+
 			if got.ReceivedAt.IsZero() {
 				t.Error("ReceivedAt was not stamped")
 			}
+
 			if got.Timestamp.IsZero() {
 				t.Error("Timestamp was not stamped")
 			}
+
 			if tc.want.Fields != 0 {
 				if got.AccuracyMeters != tc.want.AccuracyMeters {
-					t.Errorf("AccuracyMeters = %v, want %v", got.AccuracyMeters, tc.want.AccuracyMeters)
+					t.Errorf(
+						"AccuracyMeters = %v, want %v",
+						got.AccuracyMeters,
+						tc.want.AccuracyMeters,
+					)
 				}
+
 				if got.AltitudeMeters != tc.want.AltitudeMeters {
-					t.Errorf("AltitudeMeters = %v, want %v", got.AltitudeMeters, tc.want.AltitudeMeters)
+					t.Errorf(
+						"AltitudeMeters = %v, want %v",
+						got.AltitudeMeters,
+						tc.want.AltitudeMeters,
+					)
 				}
+
 				if got.VerticalAccuracyMeters != tc.want.VerticalAccuracyMeters {
-					t.Errorf("VerticalAccuracyMeters = %v, want %v", got.VerticalAccuracyMeters, tc.want.VerticalAccuracyMeters)
+					t.Errorf(
+						"VerticalAccuracyMeters = %v, want %v",
+						got.VerticalAccuracyMeters,
+						tc.want.VerticalAccuracyMeters,
+					)
 				}
+
 				if got.SpeedMetersPerSecond != tc.want.SpeedMetersPerSecond {
-					t.Errorf("SpeedMetersPerSecond = %v, want %v", got.SpeedMetersPerSecond, tc.want.SpeedMetersPerSecond)
+					t.Errorf(
+						"SpeedMetersPerSecond = %v, want %v",
+						got.SpeedMetersPerSecond,
+						tc.want.SpeedMetersPerSecond,
+					)
 				}
+
 				if got.HeadingDegrees != tc.want.HeadingDegrees {
-					t.Errorf("HeadingDegrees = %v, want %v", got.HeadingDegrees, tc.want.HeadingDegrees)
+					t.Errorf(
+						"HeadingDegrees = %v, want %v",
+						got.HeadingDegrees,
+						tc.want.HeadingDegrees,
+					)
 				}
+
 				if !got.Timestamp.Equal(tc.want.Timestamp) {
-					t.Errorf("Timestamp = %v, want the CLLocation's %v", got.Timestamp, tc.want.Timestamp)
+					t.Errorf(
+						"Timestamp = %v, want the CLLocation's %v",
+						got.Timestamp,
+						tc.want.Timestamp,
+					)
 				}
 			} else {
 				// An absent field must be left at zero, not filled with the
 				// -1 sentinel CoreLocation reported.
-				if got.AltitudeMeters != 0 || got.SpeedMetersPerSecond != 0 || got.HeadingDegrees != 0 {
+				if got.AltitudeMeters != 0 || got.SpeedMetersPerSecond != 0 ||
+					got.HeadingDegrees != 0 {
 					t.Errorf("absent fields carried values: %+v", got)
 				}
 			}
@@ -409,6 +498,7 @@ func TestDidUpdateLocationsMapsTheOptionalFields(t *testing.T) {
 // validates cleanly and would be cached as a real position off West Africa.
 func TestDidUpdateLocationsIgnoresAnEmptyArray(t *testing.T) {
 	withLoadedCoreLocation(t)
+
 	sink := &fakeSink{}
 	self := registerDelegate(t, &backend{sink: sink})
 

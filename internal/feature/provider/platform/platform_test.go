@@ -25,7 +25,10 @@ func TestNewReturnsExactlyOneOfAProviderOrAnError(t *testing.T) {
 
 	// PermissionDoNotRequest keeps this from raising an OS permission prompt
 	// on the platforms that have one; construction alone must not ask.
-	native, err := factory.New(provider.Options{Permission: provider.PermissionDoNotRequest}, discardSink{})
+	native, err := factory.New(
+		provider.Options{Permission: provider.PermissionDoNotRequest},
+		discardSink{},
+	)
 	if native != nil {
 		t.Cleanup(func() { _ = native.Stop() })
 	}

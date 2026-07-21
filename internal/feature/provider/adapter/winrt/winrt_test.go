@@ -8,7 +8,6 @@ import (
 
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/devices/geolocation"
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/foundation"
-
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 )
 

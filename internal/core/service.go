@@ -75,6 +75,7 @@ func New(opts Options, features Features) *Service {
 	if features.Clock == nil {
 		features.Clock = systemclock.Clock{}
 	}
+
 	if features.Gate == nil {
 		features.Gate = rules.New(admission.Rules{
 			MinimumInterval:       opts.MinimumInterval,
@@ -82,12 +83,15 @@ func New(opts Options, features Features) *Service {
 			MaximumAge:            opts.MaximumAge,
 		})
 	}
+
 	if features.Hub == nil {
 		features.Hub = chanhub.New()
 	}
+
 	if features.Cache == nil {
 		features.Cache = atomiccache.New()
 	}
+
 	if features.Lifecycle == nil {
 		features.Lifecycle = atomicstate.New(geo.Status{
 			State:      geo.StateStarting,
@@ -122,12 +126,15 @@ func (s *Service) Current(ctx context.Context) (geo.Fix, error) {
 	if ctx == nil {
 		return geo.Fix{}, fmt.Errorf("%w: nil context", geo.ErrInvalidConfig)
 	}
+
 	if s.closed.Load() {
 		return geo.Fix{}, geo.ErrClosed
 	}
+
 	if fix, ok := s.cache.Load(); ok && geo.IsFresh(fix, s.maximumAge, s.clock.Now()) {
 		return fix, nil
 	}
+
 	return s.Next(ctx)
 }
 
@@ -136,6 +143,7 @@ func (s *Service) Next(ctx context.Context) (geo.Fix, error) {
 	if ctx == nil {
 		return geo.Fix{}, fmt.Errorf("%w: nil context", geo.ErrInvalidConfig)
 	}
+
 	if s.closed.Load() {
 		return geo.Fix{}, geo.ErrClosed
 	}
@@ -156,9 +164,11 @@ func (s *Service) Next(ctx context.Context) (geo.Fix, error) {
 		if !ok {
 			return geo.Fix{}, geo.ErrClosed
 		}
+
 		if event.Err != nil {
 			return geo.Fix{}, event.Err
 		}
+
 		return event.Fix, nil
 	case <-ctx.Done():
 		return geo.Fix{}, ctx.Err()
@@ -169,10 +179,17 @@ func (s *Service) Next(ctx context.Context) (geo.Fix, error) {
 func (s *Service) Last() (geo.Fix, bool) { return s.cache.Load() }
 
 // Subscribe creates an independent real-time stream.
-func (s *Service) Subscribe(ctx context.Context, config fanout.SubscriptionConfig) (fanout.Subscription, error) {
+func (s *Service) Subscribe(
+	ctx context.Context,
+	config fanout.SubscriptionConfig,
+) (fanout.Subscription, error) {
 	if ctx == nil {
-		return fanout.Subscription{}, fmt.Errorf("%w: nil subscription context", geo.ErrInvalidConfig)
+		return fanout.Subscription{}, fmt.Errorf(
+			"%w: nil subscription context",
+			geo.ErrInvalidConfig,
+		)
 	}
+
 	if s.closed.Load() {
 		return fanout.Subscription{}, geo.ErrClosed
 	}
@@ -211,8 +228,10 @@ func (s *Service) Capabilities() geo.Capabilities { return s.capabilities }
 
 func (s *Service) Close() error {
 	var stopErr error
+
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
+
 		if s.native != nil {
 			stopErr = s.native.Stop()
 		}
@@ -221,6 +240,7 @@ func (s *Service) Close() error {
 		s.PublishStatus(geo.Status{State: geo.StateClosed, Message: "closed"})
 		s.hub.Close()
 	})
+
 	return stopErr
 }
 
@@ -231,13 +251,16 @@ func (s *Service) PublishFix(fix geo.Fix) {
 	if s.closed.Load() {
 		return
 	}
+
 	now := s.clock.Now()
 	if fix.ReceivedAt.IsZero() {
 		fix.ReceivedAt = now
 	}
+
 	if fix.Timestamp.IsZero() {
 		fix.Timestamp = fix.ReceivedAt
 	}
+
 	fix.Timestamp = fix.Timestamp.UTC()
 	fix.ReceivedAt = fix.ReceivedAt.UTC()
 
@@ -245,8 +268,10 @@ func (s *Service) PublishFix(fix geo.Fix) {
 	if err != nil {
 		// The gate reports the cause; only here is the platform known.
 		s.PublishError(geo.Wrap(s.platform, "admit fix", err, true))
+
 		return
 	}
+
 	if !admitted {
 		return
 	}
@@ -259,6 +284,7 @@ func (s *Service) PublishFix(fix geo.Fix) {
 			s.hub.BroadcastStatus(status)
 		}
 	}
+
 	s.hub.BroadcastFix(fix)
 }
 
@@ -268,6 +294,7 @@ func (s *Service) PublishError(err error) {
 	if err == nil || s.closed.Load() {
 		return
 	}
+
 	s.hub.BroadcastError(err)
 }
 
@@ -277,24 +304,38 @@ func (s *Service) PublishStatus(status geo.Status) {
 	if s.closed.Load() && status.State != geo.StateClosed {
 		return
 	}
+
 	if recorded, changed := s.lifecycle.Set(status); changed {
 		s.hub.BroadcastStatus(recorded)
 	}
 }
 
-func (s *Service) normalizeSubscription(in fanout.SubscriptionConfig) (fanout.SubscriptionConfig, error) {
+func (s *Service) normalizeSubscription(
+	in fanout.SubscriptionConfig,
+) (fanout.SubscriptionConfig, error) {
 	out := in
 	if out.Buffer == 0 {
 		out.Buffer = s.defaultChannelBuffer
 	}
+
 	if out.Buffer < 1 {
-		return fanout.SubscriptionConfig{}, fmt.Errorf("%w: subscription buffer must be at least 1", geo.ErrInvalidConfig)
+		return fanout.SubscriptionConfig{}, fmt.Errorf(
+			"%w: subscription buffer must be at least 1",
+			geo.ErrInvalidConfig,
+		)
 	}
+
 	if out.DropPolicy == fanout.DropDefault {
 		out.DropPolicy = s.defaultDropPolicy
 	}
+
 	if out.DropPolicy > fanout.DropNewest {
-		return fanout.SubscriptionConfig{}, fmt.Errorf("%w: unknown subscription drop policy %d", geo.ErrInvalidConfig, out.DropPolicy)
+		return fanout.SubscriptionConfig{}, fmt.Errorf(
+			"%w: unknown subscription drop policy %d",
+			geo.ErrInvalidConfig,
+			out.DropPolicy,
+		)
 	}
+
 	return out, nil
 }

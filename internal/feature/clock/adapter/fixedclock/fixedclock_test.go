@@ -18,6 +18,7 @@ func TestNewNormalisesToUTC(t *testing.T) {
 	if got := clock.Now(); !got.Equal(epoch) {
 		t.Fatalf("Now = %v, want %v", got, epoch)
 	}
+
 	if got := clock.Now().Location(); got != time.UTC {
 		t.Fatalf("Location = %v, want UTC", got)
 	}
@@ -33,6 +34,7 @@ func TestSetJumpsToAnAbsoluteTime(t *testing.T) {
 	if got := clock.Now(); !got.Equal(want) {
 		t.Fatalf("Now = %v, want %v", got, want)
 	}
+
 	if got := clock.Now().Location(); got != time.UTC {
 		t.Fatalf("Location = %v, want UTC", got)
 	}
@@ -54,6 +56,7 @@ func TestAdvanceMovesInEitherDirection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			clock := New(epoch)
 			clock.Advance(tc.by)
+
 			if got := clock.Now(); !got.Equal(tc.want) {
 				t.Fatalf("Now = %v, want %v", got, tc.want)
 			}
@@ -76,15 +79,18 @@ func TestAdvanceAccumulates(t *testing.T) {
 // proves it.
 func TestNowAndAdvanceAreSafeConcurrently(t *testing.T) {
 	clock := New(epoch)
-	const readers = 8
-	const advances = 200
+
+	const (
+		readers  = 8
+		advances = 200
+	)
 
 	var wg sync.WaitGroup
+
 	stop := make(chan struct{})
+
 	for range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -92,16 +98,18 @@ func TestNowAndAdvanceAreSafeConcurrently(t *testing.T) {
 				default:
 					if clock.Now().Before(epoch) {
 						t.Error("Now went backwards while only advancing forward")
+
 						return
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	for range advances {
 		clock.Advance(time.Millisecond)
 	}
+
 	close(stop)
 	wg.Wait()
 

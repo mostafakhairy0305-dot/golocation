@@ -37,13 +37,18 @@ func New(initial geo.Status, clock clock.Clock) *Tracker {
 	if initial.UpdatedAt.IsZero() {
 		initial.UpdatedAt = clock.Now()
 	}
+
 	tracker := &Tracker{clock: clock}
 	tracker.state.Store(uint32(initial.State))
 	tracker.status.Store(&initial)
+
 	return tracker
 }
 
-func (t *Tracker) State() geo.State { return geo.State(t.state.Load()) }
+// State narrows the stored word back to geo.State's uint8. Every write goes
+// through store, which only ever widens a geo.State, so the mask discards
+// nothing — it just says so in a form the compiler and the linters can see.
+func (t *Tracker) State() geo.State { return geo.State(t.state.Load() & 0xFF) }
 
 func (t *Tracker) Get() geo.Status { return *t.status.Load() }
 
@@ -60,6 +65,7 @@ func (t *Tracker) Set(status geo.Status) (geo.Status, bool) {
 	if status.Permission == geo.PermissionUnknown {
 		status.Permission = t.status.Load().Permission
 	}
+
 	return t.store(status)
 }
 
@@ -70,11 +76,13 @@ func (t *Tracker) MarkReady(message string) (geo.Status, bool) {
 	next := *t.status.Load()
 	next.State = geo.StateReady
 	next.Message = message
+
 	next.UpdatedAt = t.clock.Now()
 	switch next.Permission {
 	case geo.PermissionUnknown, geo.PermissionPromptRequired:
 		next.Permission = geo.PermissionGranted
 	}
+
 	return t.store(next)
 }
 
@@ -96,5 +104,6 @@ func (t *Tracker) store(next geo.Status) (geo.Status, bool) {
 	// under the lock and reports changed=false when there is nothing new.
 	t.state.Store(uint32(next.State))
 	t.status.Store(&next)
+
 	return next, changed
 }

@@ -48,26 +48,25 @@ func TestConcurrentStoresAndLoads(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for writer := range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 500 {
 				cache.Store(geo.Fix{Latitude: float64(writer), Longitude: float64(i)})
 			}
-		}()
+		})
 	}
+
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 500 {
 				if _, ok := cache.Load(); !ok {
 					t.Error("Load reported an empty cache after a Store")
+
 					return
 				}
 			}
-		}()
+		})
 	}
+
 	wg.Wait()
 }
 

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
-
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
@@ -23,16 +22,28 @@ func TestGeoClueAccuracyBucketsTheRequest(t *testing.T) {
 		opts Options
 		want uint32
 	}{
-		"exact at the boundary":        {opts: Options{DesiredAccuracyMeters: 100}, want: 8},
-		"street just past exact":       {opts: Options{DesiredAccuracyMeters: 101}, want: 6},
-		"street at the boundary":       {opts: Options{DesiredAccuracyMeters: 1000}, want: 6},
-		"neighborhood":                 {opts: Options{DesiredAccuracyMeters: 10000}, want: 5},
-		"city beyond every bucket":     {opts: Options{DesiredAccuracyMeters: 10001}, want: 4},
-		"metres win over a preference": {opts: Options{DesiredAccuracyMeters: 50, Accuracy: provider.AccuracyBalanced}, want: 8},
-		"high":                         {opts: Options{Accuracy: provider.AccuracyHigh}, want: 8},
-		"navigation":                   {opts: Options{Accuracy: provider.AccuracyNavigation}, want: 8},
-		"balanced":                     {opts: Options{Accuracy: provider.AccuracyBalanced}, want: 6},
-		"an unknown preference":        {opts: Options{Accuracy: provider.AccuracyNavigation + 1}, want: 6},
+		"exact at the boundary":    {opts: Options{DesiredAccuracyMeters: 100}, want: 8},
+		"street just past exact":   {opts: Options{DesiredAccuracyMeters: 101}, want: 6},
+		"street at the boundary":   {opts: Options{DesiredAccuracyMeters: 1000}, want: 6},
+		"neighborhood":             {opts: Options{DesiredAccuracyMeters: 10000}, want: 5},
+		"city beyond every bucket": {opts: Options{DesiredAccuracyMeters: 10001}, want: 4},
+		"metres win over a preference": {
+			opts: Options{DesiredAccuracyMeters: 50, Accuracy: provider.AccuracyBalanced},
+			want: 8,
+		},
+		"high": {opts: Options{Accuracy: provider.AccuracyHigh}, want: 8},
+		"navigation": {
+			opts: Options{Accuracy: provider.AccuracyNavigation},
+			want: 8,
+		},
+		"balanced": {
+			opts: Options{Accuracy: provider.AccuracyBalanced},
+			want: 6,
+		},
+		"an unknown preference": {
+			opts: Options{Accuracy: provider.AccuracyNavigation + 1},
+			want: 6,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -18,7 +18,6 @@ import (
 	wruntime "github.com/deploymenttheory/go-bindings-winrt/bindings/runtime/winrt"
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/devices/geolocation"
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/foundation"
-
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
 )
@@ -69,7 +68,13 @@ func (b *backend) Capabilities() geo.Capabilities {
 
 func (b *backend) Start(ctx context.Context) error {
 	if b.opts.Permission != provider.PermissionDoNotRequest {
-		b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: geo.PermissionPromptRequired, Message: "requesting Windows location access"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateStarting,
+				Permission: geo.PermissionPromptRequired,
+				Message:    "requesting Windows location access",
+			},
+		)
 		if err := b.requestAccess(ctx); err != nil {
 			return err
 		}
@@ -81,7 +86,8 @@ func (b *backend) Start(ctx context.Context) error {
 	}
 
 	accuracy := geolocation.PositionAccuracyDefault
-	if b.opts.Accuracy == provider.AccuracyHigh || b.opts.Accuracy == provider.AccuracyNavigation || b.opts.DesiredAccuracyMeters > 0 {
+	if b.opts.Accuracy == provider.AccuracyHigh || b.opts.Accuracy == provider.AccuracyNavigation ||
+		b.opts.DesiredAccuracyMeters > 0 {
 		accuracy = geolocation.PositionAccuracyHigh
 	}
 	if err := locator.SetDesiredAccuracy(accuracy); err != nil {
@@ -89,7 +95,10 @@ func (b *backend) Start(ctx context.Context) error {
 		return geo.Wrap(platform, "set accuracy", err, false)
 	}
 	if b.opts.DesiredAccuracyMeters > 0 {
-		if err := setWindowsDesiredAccuracyMeters(locator, b.opts.DesiredAccuracyMeters); err != nil {
+		if err := setWindowsDesiredAccuracyMeters(
+			locator,
+			b.opts.DesiredAccuracyMeters,
+		); err != nil {
 			locator.Release()
 			return geo.Wrap(platform, "set desired accuracy in meters", err, false)
 		}
@@ -119,7 +128,9 @@ func (b *backend) Start(ctx context.Context) error {
 				return
 			}
 			if position == nil {
-				b.sink.PublishError(geo.Wrap(platform, "read position event", geo.ErrPositionUnavailable, true))
+				b.sink.PublishError(
+					geo.Wrap(platform, "read position event", geo.ErrPositionUnavailable, true),
+				)
 				return
 			}
 			defer position.Release()
@@ -177,7 +188,13 @@ func (b *backend) Start(ctx context.Context) error {
 	if status, statusErr := locator.LocationStatus(); statusErr == nil {
 		b.publishWindowsStatus(status)
 	} else {
-		b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: geo.PermissionGranted, Message: "Windows Geolocator started"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateStarting,
+				Permission: geo.PermissionGranted,
+				Message:    "Windows Geolocator started",
+			},
+		)
 	}
 
 	b.startInitialRead(locator)
@@ -254,10 +271,22 @@ func (b *backend) requestAccess(ctx context.Context) error {
 		}
 		switch result.status {
 		case geolocation.GeolocationAccessStatusAllowed:
-			b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: geo.PermissionGranted, Message: "Windows location access granted"})
+			b.sink.PublishStatus(
+				geo.Status{
+					State:      geo.StateStarting,
+					Permission: geo.PermissionGranted,
+					Message:    "Windows location access granted",
+				},
+			)
 			return nil
 		case geolocation.GeolocationAccessStatusDenied:
-			b.sink.PublishStatus(geo.Status{State: geo.StateDisabled, Permission: geo.PermissionDenied, Message: "Windows location access denied"})
+			b.sink.PublishStatus(
+				geo.Status{
+					State:      geo.StateDisabled,
+					Permission: geo.PermissionDenied,
+					Message:    "Windows location access denied",
+				},
+			)
 			return geo.Wrap(platform, "request access", geo.ErrPermissionDenied, false)
 		default:
 			return geo.Wrap(platform, "request access", geo.ErrPermissionNeeded, false)
@@ -292,7 +321,9 @@ func (b *backend) startInitialRead(locator *geolocation.Geolocator) {
 			return
 		}
 		if position == nil {
-			b.sink.PublishError(geo.Wrap(platform, "initial position request", geo.ErrPositionUnavailable, true))
+			b.sink.PublishError(
+				geo.Wrap(platform, "initial position request", geo.ErrPositionUnavailable, true),
+			)
 			return
 		}
 		defer position.Release()
@@ -359,13 +390,19 @@ func (b *backend) publishPosition(position *geolocation.IGeoposition) {
 		fix.Fields |= geo.FieldHeading
 	}
 
-	if positionData, queryErr := wruntime.QueryInterface[geolocation.IGeocoordinateWithPositionData](unsafe.Pointer(coordinate), &geolocation.IID_IGeocoordinateWithPositionData); queryErr == nil {
+	if positionData, queryErr := wruntime.QueryInterface[geolocation.IGeocoordinateWithPositionData](
+		unsafe.Pointer(coordinate),
+		&geolocation.IID_IGeocoordinateWithPositionData,
+	); queryErr == nil {
 		if source, sourceErr := positionData.PositionSource(); sourceErr == nil {
 			fix.Source = mapWindowsSource(source)
 		}
 		positionData.Release()
 	}
-	if remoteData, queryErr := wruntime.QueryInterface[geolocation.IGeocoordinateWithRemoteSource](unsafe.Pointer(coordinate), &geolocation.IID_IGeocoordinateWithRemoteSource); queryErr == nil {
+	if remoteData, queryErr := wruntime.QueryInterface[geolocation.IGeocoordinateWithRemoteSource](
+		unsafe.Pointer(coordinate),
+		&geolocation.IID_IGeocoordinateWithRemoteSource,
+	); queryErr == nil {
 		if remote, remoteErr := remoteData.IsRemoteSource(); remoteErr == nil && remote {
 			fix.Source = geo.SourceRemote
 		}
@@ -379,21 +416,63 @@ func (b *backend) publishWindowsStatus(status geolocation.PositionStatus) {
 	permission := geo.PermissionGranted
 	switch status {
 	case geolocation.PositionStatusReady:
-		b.sink.PublishStatus(geo.Status{State: geo.StateReady, Permission: permission, Message: "Windows location ready"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateReady,
+				Permission: permission,
+				Message:    "Windows location ready",
+			},
+		)
 	case geolocation.PositionStatusInitializing:
-		b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: permission, Message: "Windows location initializing"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateStarting,
+				Permission: permission,
+				Message:    "Windows location initializing",
+			},
+		)
 	case geolocation.PositionStatusNoData:
-		b.sink.PublishStatus(geo.Status{State: geo.StateUnavailable, Permission: permission, Message: "Windows location has no data"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateUnavailable,
+				Permission: permission,
+				Message:    "Windows location has no data",
+			},
+		)
 	case geolocation.PositionStatusDisabled:
-		b.sink.PublishStatus(geo.Status{State: geo.StateDisabled, Permission: geo.PermissionDenied, Message: "Windows location disabled"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateDisabled,
+				Permission: geo.PermissionDenied,
+				Message:    "Windows location disabled",
+			},
+		)
 		b.sink.PublishError(geo.Wrap(platform, "status", geo.ErrServiceDisabled, false))
 	case geolocation.PositionStatusNotInitialized:
-		b.sink.PublishStatus(geo.Status{State: geo.StateStarting, Permission: geo.PermissionUnknown, Message: "Windows location not initialized"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateStarting,
+				Permission: geo.PermissionUnknown,
+				Message:    "Windows location not initialized",
+			},
+		)
 	case geolocation.PositionStatusNotAvailable:
-		b.sink.PublishStatus(geo.Status{State: geo.StateUnavailable, Permission: permission, Message: "Windows location unavailable"})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateUnavailable,
+				Permission: permission,
+				Message:    "Windows location unavailable",
+			},
+		)
 		b.sink.PublishError(geo.Wrap(platform, "status", geo.ErrServiceUnavailable, true))
 	default:
-		b.sink.PublishStatus(geo.Status{State: geo.StateUnavailable, Permission: geo.PermissionUnknown, Message: fmt.Sprintf("unknown Windows location status %d", status)})
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateUnavailable,
+				Permission: geo.PermissionUnknown,
+				Message:    fmt.Sprintf("unknown Windows location status %d", status),
+			},
+		)
 	}
 }
 

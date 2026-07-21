@@ -16,6 +16,7 @@ func TestNewFailsWithTheUnsupportedSentinelAndNoProvider(t *testing.T) {
 	if provider != nil {
 		t.Fatalf("Provider = %v, want nil", provider)
 	}
+
 	if !errors.Is(err, geo.ErrUnsupported) {
 		t.Fatalf("error = %v, want ErrUnsupported", err)
 	}
@@ -24,9 +25,11 @@ func TestNewFailsWithTheUnsupportedSentinelAndNoProvider(t *testing.T) {
 	if !errors.As(err, &annotated) {
 		t.Fatalf("error = %v, want a *geo.Error", err)
 	}
+
 	if annotated.Platform != "plan9" {
 		t.Errorf("Platform = %q, want %q", annotated.Platform, "plan9")
 	}
+
 	if annotated.Op != "open" {
 		t.Errorf("Op = %q, want %q", annotated.Op, "open")
 	}

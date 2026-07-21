@@ -28,6 +28,7 @@ func New(now time.Time) *Clock { return &Clock{now: now.UTC()} }
 func (c *Clock) Now() time.Time {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	return c.now
 }
 
@@ -35,6 +36,7 @@ func (c *Clock) Now() time.Time {
 func (c *Clock) Set(now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.now = now.UTC()
 }
 
@@ -42,5 +44,6 @@ func (c *Clock) Set(now time.Time) {
 func (c *Clock) Advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.now = c.now.Add(d)
 }

@@ -17,7 +17,10 @@ func TestDropOldestKeepsTheNewestValue(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -36,7 +39,10 @@ func TestDropNewestKeepsTheQueuedValue(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropNewest}, fanout.Priming{})
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropNewest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -62,18 +68,25 @@ func TestPrimingArrivesBeforeAnyBroadcast(t *testing.T) {
 		Fix:    fixAt(7),
 		HasFix: true,
 	}
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 4, DropPolicy: fanout.DropOldest, ReplayLatest: true}, priming)
+
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 4, DropPolicy: fanout.DropOldest, ReplayLatest: true},
+		priming,
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
 	hub.BroadcastFix(fixAt(8))
 
 	if first := <-stream.Locations; first.Latitude != 7 {
 		t.Fatalf("first fix = %v, want the primed 7", first.Latitude)
 	}
+
 	if second := <-stream.Locations; second.Latitude != 8 {
 		t.Fatalf("second fix = %v, want the broadcast 8", second.Latitude)
 	}
+
 	if status := <-stream.Statuses; status.Message != "primed" {
 		t.Fatalf("status = %q, want the primed one", status.Message)
 	}
@@ -83,10 +96,14 @@ func TestReplayLatestIsIgnoredWithoutAFix(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest, ReplayLatest: true}, fanout.Priming{})
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest, ReplayLatest: true},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
 	select {
 	case fix := <-stream.Locations:
 		t.Fatalf("replayed a fix that was never stored: %+v", fix)
@@ -102,6 +119,7 @@ func TestWaiterTakesTheFirstEventAndIgnoresTheRest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddOnce: %v", err)
 	}
+
 	hub.BroadcastFix(fixAt(1))
 	hub.BroadcastFix(fixAt(2))
 	hub.BroadcastError(errors.New("late"))
@@ -110,6 +128,7 @@ func TestWaiterTakesTheFirstEventAndIgnoresTheRest(t *testing.T) {
 	if event.Err != nil || event.Fix.Latitude != 1 {
 		t.Fatalf("event = %+v, want the first fix", event)
 	}
+
 	select {
 	case extra := <-events:
 		t.Fatalf("a one-shot waiter delivered twice: %+v", extra)
@@ -125,6 +144,7 @@ func TestWaiterReceivesAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddOnce: %v", err)
 	}
+
 	want := errors.New("provider failed")
 	hub.BroadcastError(want)
 
@@ -139,7 +159,10 @@ func TestBroadcastErrorReachesSubscriptions(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -164,14 +187,22 @@ func TestBroadcastStatusReachesSubscriptionsButNeverWaiters(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, first, err := hub.Add(fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	_, first, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	_, second, err := hub.Add(fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+
+	_, second, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 2, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
 	_, events, err := hub.AddOnce()
 	if err != nil {
 		t.Fatalf("AddOnce: %v", err)
@@ -206,7 +237,10 @@ func TestDropOldestKeepsTheNewestStatus(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	_, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	_, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -229,6 +263,7 @@ func TestRemoveOnceStopsDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddOnce: %v", err)
 	}
+
 	hub.RemoveOnce(id)
 	hub.RemoveOnce(id) // idempotent
 	hub.BroadcastFix(fixAt(1))
@@ -238,6 +273,7 @@ func TestRemoveOnceStopsDelivery(t *testing.T) {
 		t.Fatalf("an unregistered waiter received %+v", event)
 	default:
 	}
+
 	if _, waiters := hub.Counts(); waiters != 0 {
 		t.Fatalf("waiters = %d, want 0", waiters)
 	}
@@ -246,10 +282,14 @@ func TestRemoveOnceStopsDelivery(t *testing.T) {
 func TestCloseClosesEveryChannelAndRejectsNewRegistrations(t *testing.T) {
 	hub := New()
 
-	id, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	id, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
 	_, events, err := hub.AddOnce()
 	if err != nil {
 		t.Fatalf("AddOnce: %v", err)
@@ -260,11 +300,14 @@ func TestCloseClosesEveryChannelAndRejectsNewRegistrations(t *testing.T) {
 
 	for range stream.Locations {
 	}
+
 	for range stream.Errors {
 	}
+
 	if _, ok := <-events; ok {
 		t.Fatal("a waiter channel stayed open after Close")
 	}
+
 	select {
 	case <-hub.Done():
 	default:
@@ -272,12 +315,21 @@ func TestCloseClosesEveryChannelAndRejectsNewRegistrations(t *testing.T) {
 	}
 
 	hub.Remove(id) // must not double-close
-	if _, _, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1}, fanout.Priming{}); !errors.Is(err, geo.ErrClosed) {
+
+	if _, _, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1},
+		fanout.Priming{},
+	); !errors.Is(
+		err,
+		geo.ErrClosed,
+	) {
 		t.Fatalf("Add after Close = %v, want ErrClosed", err)
 	}
+
 	if _, _, err := hub.AddOnce(); !errors.Is(err, geo.ErrClosed) {
 		t.Fatalf("AddOnce after Close = %v, want ErrClosed", err)
 	}
+
 	if streams, waiters := hub.Counts(); streams != 0 || waiters != 0 {
 		t.Fatalf("counts after Close = %d/%d, want 0/0", streams, waiters)
 	}
@@ -287,17 +339,23 @@ func TestRemoveClosesTheStreamAndIsIdempotent(t *testing.T) {
 	hub := New()
 	defer hub.Close()
 
-	id, stream, err := hub.Add(fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest}, fanout.Priming{})
+	id, stream, err := hub.Add(
+		fanout.SubscriptionConfig{Buffer: 1, DropPolicy: fanout.DropOldest},
+		fanout.Priming{},
+	)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+
 	hub.Remove(id)
 	hub.Remove(id)
 
 	if _, ok := <-stream.Errors; ok {
 		t.Fatal("a removed stream stayed open")
 	}
+
 	hub.BroadcastFix(fixAt(1)) // must not send on a closed channel
+
 	if streams, _ := hub.Counts(); streams != 0 {
 		t.Fatalf("streams = %d, want 0", streams)
 	}
@@ -306,13 +364,17 @@ func TestRemoveClosesTheStreamAndIsIdempotent(t *testing.T) {
 func BenchmarkBroadcastFixToWaiters(b *testing.B) {
 	hub := New()
 	defer hub.Close()
+
 	for range 8 {
 		if _, _, err := hub.AddOnce(); err != nil {
 			b.Fatalf("AddOnce: %v", err)
 		}
 	}
+
 	fix := fixAt(1)
+
 	b.ReportAllocs()
+
 	for b.Loop() {
 		hub.BroadcastFix(fix)
 	}

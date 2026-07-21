@@ -28,7 +28,8 @@ func TestValidateRejectsEveryUnusableCoordinate(t *testing.T) {
 	}
 	for name, fix := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := Validate(fix); err == nil {
+			err := Validate(fix)
+			if err == nil {
 				t.Fatalf("Validate(%+v) = nil, want an error", fix)
 			}
 		})
@@ -47,7 +48,8 @@ func TestValidateAcceptsCoordinatesOnTheBoundary(t *testing.T) {
 	}
 	for name, fix := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := Validate(fix); err != nil {
+			err := Validate(fix)
+			if err != nil {
 				t.Fatalf("Validate(%+v) = %v, want nil", fix, err)
 			}
 		})
@@ -61,6 +63,7 @@ func TestDistanceIsSymmetricAndZeroForAPoint(t *testing.T) {
 	if got := Distance(london, london); got != 0 {
 		t.Fatalf("Distance to itself = %v, want 0", got)
 	}
+
 	there, back := Distance(london, paris), Distance(paris, london)
 	if math.Abs(there-back) > 1e-6 {
 		t.Fatalf("Distance is not symmetric: %v vs %v", there, back)
@@ -74,6 +77,7 @@ func TestDistanceIsSymmetricAndZeroForAPoint(t *testing.T) {
 
 func TestDistanceAcrossTheAntimeridianIsShort(t *testing.T) {
 	west := Fix{Latitude: 0, Longitude: 179.999}
+
 	east := Fix{Latitude: 0, Longitude: -179.999}
 	if got := Distance(west, east); got > 1000 {
 		t.Fatalf("Distance = %v m, want a short hop across the antimeridian", got)
@@ -82,6 +86,7 @@ func TestDistanceAcrossTheAntimeridianIsShort(t *testing.T) {
 
 func TestIsFresh(t *testing.T) {
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
+
 	cases := map[string]struct {
 		timestamp time.Time
 		maxAge    time.Duration
@@ -105,9 +110,12 @@ func TestIsFresh(t *testing.T) {
 
 func BenchmarkValidate(b *testing.B) {
 	fix := Fix{Latitude: 51.5074, Longitude: -0.1278, AccuracyMeters: 12.5}
+
 	b.ReportAllocs()
+
 	for b.Loop() {
-		if err := Validate(fix); err != nil {
+		err := Validate(fix)
+		if err != nil {
 			b.Fatalf("Validate: %v", err)
 		}
 	}
@@ -116,7 +124,9 @@ func BenchmarkValidate(b *testing.B) {
 func BenchmarkDistance(b *testing.B) {
 	london := Fix{Latitude: 51.5074, Longitude: -0.1278}
 	paris := Fix{Latitude: 48.8566, Longitude: 2.3522}
+
 	b.ReportAllocs()
+
 	for b.Loop() {
 		_ = Distance(london, paris)
 	}

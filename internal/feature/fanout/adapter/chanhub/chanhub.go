@@ -44,7 +44,10 @@ func New() *Hub {
 
 func (h *Hub) Done() <-chan struct{} { return h.done }
 
-func (h *Hub) Add(cfg fanout.SubscriptionConfig, priming fanout.Priming) (uint64, fanout.Subscription, error) {
+func (h *Hub) Add(
+	cfg fanout.SubscriptionConfig,
+	priming fanout.Priming,
+) (uint64, fanout.Subscription, error) {
 	sub := &subscriber{
 		fixes:    make(chan geo.Fix, cfg.Buffer),
 		errors:   make(chan error, cfg.Buffer),
@@ -57,6 +60,7 @@ func (h *Hub) Add(cfg fanout.SubscriptionConfig, priming fanout.Priming) (uint64
 	if h.closed {
 		h.mu.Unlock()
 		sub.close()
+
 		return 0, fanout.Subscription{}, geo.ErrClosed
 	}
 	// Priming happens under the write lock, on channels nobody else can reach
@@ -64,9 +68,11 @@ func (h *Hub) Add(cfg fanout.SubscriptionConfig, priming fanout.Priming) (uint64
 	// racing this registration land first and leave the subscriber holding a
 	// newer fix behind an older primed one.
 	offer(sub.statuses, priming.Status, sub.policy)
+
 	if cfg.ReplayLatest && priming.HasFix {
 		offer(sub.fixes, priming.Fix, sub.policy)
 	}
+
 	h.subs[id] = sub
 	h.mu.Unlock()
 
@@ -80,6 +86,7 @@ func (h *Hub) Add(cfg fanout.SubscriptionConfig, priming fanout.Priming) (uint64
 func (h *Hub) Remove(id uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if sub, ok := h.subs[id]; ok {
 		delete(h.subs, id)
 		sub.close()
@@ -94,11 +101,15 @@ func (h *Hub) AddOnce() (uint64, <-chan fanout.Event, error) {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if h.closed {
 		close(events)
+
 		return 0, events, geo.ErrClosed
 	}
+
 	h.waiters[id] = events
+
 	return id, events, nil
 }
 
@@ -108,6 +119,7 @@ func (h *Hub) AddOnce() (uint64, <-chan fanout.Event, error) {
 func (h *Hub) RemoveOnce(id uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	delete(h.waiters, id)
 }
 
@@ -117,15 +129,18 @@ func (h *Hub) RemoveOnce(id uint64) {
 func (h *Hub) Counts() (subscriptions, waiters int) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	return len(h.subs), len(h.waiters)
 }
 
 func (h *Hub) BroadcastFix(fix geo.Fix) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	for _, sub := range h.subs {
 		offer(sub.fixes, fix, sub.policy)
 	}
+
 	for _, events := range h.waiters {
 		wake(events, fanout.Event{Fix: fix})
 	}
@@ -137,9 +152,11 @@ func (h *Hub) BroadcastFix(fix geo.Fix) {
 func (h *Hub) BroadcastError(err error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	for _, sub := range h.subs {
 		offer(sub.errors, err, sub.policy)
 	}
+
 	for _, events := range h.waiters {
 		wake(events, fanout.Event{Err: err})
 	}
@@ -148,6 +165,7 @@ func (h *Hub) BroadcastError(err error) {
 func (h *Hub) BroadcastStatus(status geo.Status) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
 	for _, sub := range h.subs {
 		offer(sub.statuses, status, sub.policy)
 	}
@@ -156,15 +174,19 @@ func (h *Hub) BroadcastStatus(status geo.Status) {
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if h.closed {
 		return
 	}
+
 	h.closed = true
 	close(h.done)
+
 	for id, sub := range h.subs {
 		delete(h.subs, id)
 		sub.close()
 	}
+
 	for id, events := range h.waiters {
 		delete(h.waiters, id)
 		close(events)
@@ -185,6 +207,7 @@ func offer[T any](ch chan T, value T, policy fanout.DropPolicy) {
 		return
 	default:
 	}
+
 	if policy == fanout.DropNewest {
 		return
 	}
@@ -196,6 +219,7 @@ func offer[T any](ch chan T, value T, policy fanout.DropPolicy) {
 	case <-ch:
 	default:
 	}
+
 	select {
 	case ch <- value:
 	default:

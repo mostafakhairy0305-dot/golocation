@@ -1,0 +1,13 @@
+---
+name: Go Lint
+description: Run formatting and lint checks
+runs:
+  using: composite
+  steps:
+    - name: Prepare Go project
+      uses: ./.github/actions/setup
+      with:
+        generate-proto: 'true'
+    - name: Run CI
+      shell: bash
+      run: task ci

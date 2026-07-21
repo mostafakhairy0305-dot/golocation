@@ -29,12 +29,15 @@ func Validate(fix Fix) error {
 	if !(fix.Latitude >= -90 && fix.Latitude <= 90) {
 		return fmt.Errorf("invalid latitude %v", fix.Latitude)
 	}
+
 	if !(fix.Longitude >= -180 && fix.Longitude <= 180) {
 		return fmt.Errorf("invalid longitude %v", fix.Longitude)
 	}
+
 	if !(fix.AccuracyMeters >= 0 && fix.AccuracyMeters <= math.MaxFloat64) {
 		return fmt.Errorf("invalid horizontal accuracy %v", fix.AccuracyMeters)
 	}
+
 	return nil
 }
 
@@ -52,6 +55,7 @@ func Distance(a, b Fix) float64 {
 	halfLat := math.Sin((b.Latitude - a.Latitude) * degreesToRadians / 2)
 	halfLon := math.Sin((b.Longitude - a.Longitude) * degreesToRadians / 2)
 	h := halfLat*halfLat + math.Cos(lat1)*math.Cos(lat2)*halfLon*halfLon
+
 	return 2 * earthRadius * math.Asin(math.Sqrt(h))
 }
 
@@ -62,6 +66,8 @@ func IsFresh(fix Fix, maxAge time.Duration, now time.Time) bool {
 	if maxAge == 0 {
 		return true
 	}
+
 	age := now.Sub(fix.Timestamp)
+
 	return age <= maxAge && age >= -MaxClockSkew
 }

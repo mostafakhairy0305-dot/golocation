@@ -30,5 +30,6 @@ func (c *Cache) Load() (geo.Fix, bool) {
 	if latest == nil {
 		return geo.Fix{}, false
 	}
+
 	return *latest, true
 }
