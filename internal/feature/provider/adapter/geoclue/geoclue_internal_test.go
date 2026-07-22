@@ -3,7 +3,6 @@
 package geoclue
 
 import (
-	"context"
 	"errors"
 	"math"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/golocation/internal/shared/retry"
 )
 
 // errTransport stands for a failure that never reached GeoClue at all, which is
@@ -274,47 +274,20 @@ func expectAnnotation(t *testing.T, got error, wantOp string, wantTemporary bool
 	}
 }
 
-// The reconnect loop uses the return value to decide whether to try again, so
-// a cancelled context reporting true would keep reconnecting after Stop.
-func TestSleepContextReportsWhetherItSleptOrWasCancelled(t *testing.T) {
+// TestConnectErrorsAreClassifiedForRetry pins the retry contract the reconnect
+// loop now leans on: the permission denial the connect path produces is
+// permanent (never retried) while an ordinary service failure is temporary
+// (retried under backoff).
+func TestConnectErrorsAreClassifiedForRetry(t *testing.T) {
 	t.Parallel()
 
-	t.Run("the timer wins", func(t *testing.T) {
-		t.Parallel()
+	denied := geo.Wrap(platform, "connect", geo.ErrPermissionDenied, false)
+	if retry.Retryable(denied) {
+		t.Errorf("Retryable(permission denied) = true, want false")
+	}
 
-		if !sleepContext(context.Background(), time.Millisecond) {
-			t.Fatal("sleepContext = false, want true after sleeping out the duration")
-		}
-	})
-
-	t.Run("the context wins", func(t *testing.T) {
-		t.Parallel()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		if sleepContext(ctx, time.Hour) {
-			t.Fatal("sleepContext = true, want false on a cancelled context")
-		}
-	})
-
-	// A zero or negative backoff is treated as one second rather than as no
-	// wait, so a misconfigured policy cannot turn the reconnect loop into a
-	// busy loop against the bus.
-	t.Run("a non-positive duration does not become a busy loop", func(t *testing.T) {
-		t.Parallel()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		start := time.Now()
-
-		if sleepContext(ctx, 0) {
-			t.Fatal("sleepContext = true, want false on a cancelled context")
-		}
-
-		if elapsed := time.Since(start); elapsed > time.Second/2 {
-			t.Fatalf("cancellation took %v, want it to return promptly", elapsed)
-		}
-	})
+	unavailable := geo.Wrap(platform, "connect", geo.ErrServiceUnavailable, true)
+	if !retry.Retryable(unavailable) {
+		t.Errorf("Retryable(service unavailable) = false, want true")
+	}
 }

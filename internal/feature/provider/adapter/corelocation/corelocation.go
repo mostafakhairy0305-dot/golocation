@@ -17,6 +17,7 @@ import (
 	"github.com/ebitengine/purego/objc"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/golocation/internal/shared/retry"
 	"github.com/mostafakhairy0305-dot/singleton"
 )
 
@@ -258,7 +259,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	ready := make(chan error, 1)
 
 	b.wg.Add(1)
-	go b.run(ready)
+	go b.run(ctx, ready)
 
 	select {
 	case err := <-ready:
@@ -283,7 +284,7 @@ func (b *Backend) Stop() error {
 	return nil
 }
 
-func (b *Backend) run(ready chan<- error) {
+func (b *Backend) run(ctx context.Context, ready chan<- error) {
 	defer b.wg.Done()
 
 	runtime.LockOSThread()
@@ -297,7 +298,7 @@ func (b *Backend) run(ready chan<- error) {
 		defer pool.Send(b.sel.drain)
 	}
 
-	manager, delegate, err := b.openSession()
+	manager, delegate, err := b.openLiveSession(ctx)
 	if err != nil {
 		ready <- err
 
@@ -306,16 +307,43 @@ func (b *Backend) run(ready chan<- error) {
 
 	defer b.closeSession(manager, delegate)
 
-	err = b.startSession(manager, delegate)
-	if err != nil {
-		ready <- err
-
-		return
-	}
-
 	ready <- nil
 
 	b.spin(delegate)
+}
+
+// liveSession pairs a started session's manager and delegate so openLiveSession
+// can return them through the single value retry.Do carries.
+type liveSession struct {
+	manager  objc.ID `exhaustruct:"optional"`
+	delegate objc.ID `exhaustruct:"optional"`
+}
+
+// openLiveSession opens the session and starts delivery, retrying the whole
+// sequence under backoff while CoreLocation reports a temporary failure. A
+// failed attempt releases whatever it built, so a retry starts from a clean
+// slate; the retry is bounded by ctx, which carries the caller's start timeout.
+// CoreLocation setup fails permanently today (missing framework, denied
+// permission), so the gate keeps this to a single attempt until an error is
+// ever marked temporary — the wrapper just makes that free when it is.
+func (b *Backend) openLiveSession(ctx context.Context) (objc.ID, objc.ID, error) {
+	live, err := retry.Do(ctx, func() (liveSession, error) {
+		manager, delegate, err := b.openSession()
+		if err != nil {
+			return liveSession{}, err
+		}
+
+		err = b.startSession(manager, delegate)
+		if err != nil {
+			b.closeSession(manager, delegate)
+
+			return liveSession{}, err
+		}
+
+		return liveSession{manager: manager, delegate: delegate}, nil
+	})
+
+	return live.manager, live.delegate, err
 }
 
 // openSession creates the manager and the delegate, and gives the delegate the

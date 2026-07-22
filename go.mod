@@ -3,6 +3,7 @@ module github.com/mostafakhairy0305-dot/golocation
 go 1.26.5
 
 require (
+	github.com/cenkalti/backoff/v7 v7.0.0
 	github.com/deploymenttheory/go-bindings-win32 v0.2.0
 	github.com/deploymenttheory/go-bindings-winrt v0.3.0
 	github.com/ebitengine/purego v0.10.2
@@ -10,7 +11,4 @@ require (
 	github.com/mostafakhairy0305-dot/singleton v0.0.0
 )
 
-require (
-	github.com/cenkalti/backoff/v7 v7.0.0 // indirect
-	golang.org/x/sys v0.27.0 // indirect
-)
+require golang.org/x/sys v0.27.0 // indirect

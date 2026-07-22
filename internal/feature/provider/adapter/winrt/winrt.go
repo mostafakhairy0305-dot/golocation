@@ -20,6 +20,7 @@ import (
 	"github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/foundation"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/golocation/internal/shared/retry"
 	"github.com/mostafakhairy0305-dot/singleton"
 )
 
@@ -89,8 +90,20 @@ func (b *Backend) Capabilities() geo.Capabilities {
 	}
 }
 
+// startedLocator is everything Start builds before the backend takes ownership:
+// the Geolocator together with the handlers and tokens that keep it delivering.
+type startedLocator struct {
+	locator       *geolocation.Geolocator                                               `exhaustruct:"optional"`
+	positionToken syswinrt.EventRegistrationToken                                       `exhaustruct:"optional"`
+	statusToken   syswinrt.EventRegistrationToken                                       `exhaustruct:"optional"`
+	positionEvent *geolocation.TypedEventHandlerOfGeolocatorAndPositionChangedEventArgs `exhaustruct:"optional"`
+	statusEvent   *geolocation.TypedEventHandlerOfGeolocatorAndStatusChangedEventArgs   `exhaustruct:"optional"`
+}
+
 // Start brings the Geolocator up and returns once it is delivering or has
-// failed.
+// failed. The permission request and the Geolocator build are each retried
+// under backoff while WinRT reports a temporary failure, both bounded by ctx,
+// which carries the caller's start timeout.
 func (b *Backend) Start(ctx context.Context) error {
 	if b.opts.Permission != provider.PermissionDoNotRequest {
 		b.sink.PublishStatus(
@@ -100,14 +113,56 @@ func (b *Backend) Start(ctx context.Context) error {
 				Message:    "requesting Windows location access",
 			},
 		)
-		if err := b.requestAccess(ctx); err != nil {
+
+		err := retry.DoErr(ctx, func() error {
+			return b.requestAccess(ctx)
+		})
+		if err != nil {
 			return err
 		}
 	}
 
+	started, err := retry.Do(ctx, func() (startedLocator, error) {
+		return b.buildLocator()
+	})
+	if err != nil {
+		return err
+	}
+
+	b.mu.Lock()
+	b.locator = started.locator
+	b.positionToken = started.positionToken
+	b.statusToken = started.statusToken
+	b.positionEvent = started.positionEvent
+	b.statusEvent = started.statusEvent
+	b.mu.Unlock()
+
+	if status, statusErr := started.locator.LocationStatus(); statusErr == nil {
+		b.publishWindowsStatus(status)
+	} else {
+		b.sink.PublishStatus(
+			geo.Status{
+				State:      geo.StateStarting,
+				Permission: geo.PermissionGranted,
+				Message:    "Windows Geolocator started",
+			},
+		)
+	}
+
+	b.startInitialRead(started.locator)
+
+	return nil
+}
+
+// buildLocator creates the Geolocator, applies the caller's accuracy and
+// interval, and subscribes the position and status handlers. Every failure path
+// releases whatever it has already built, so the sequence is atomic: it returns
+// a fully wired locator or leaves nothing behind, which is what lets Start retry
+// it cleanly.
+func (b *Backend) buildLocator() (startedLocator, error) {
 	locator, err := geolocation.NewGeolocator()
 	if err != nil {
-		return geo.Wrap(platform, "create Geolocator", err, false)
+		return startedLocator{}, geo.Wrap(platform, "create Geolocator", err, false)
 	}
 
 	accuracy := geolocation.PositionAccuracyDefault
@@ -117,7 +172,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	}
 	if err := locator.SetDesiredAccuracy(accuracy); err != nil {
 		locator.Release()
-		return geo.Wrap(platform, "set accuracy", err, false)
+		return startedLocator{}, geo.Wrap(platform, "set accuracy", err, false)
 	}
 	if b.opts.DesiredAccuracyMeters > 0 {
 		if err := setWindowsDesiredAccuracyMeters(
@@ -125,7 +180,12 @@ func (b *Backend) Start(ctx context.Context) error {
 			b.opts.DesiredAccuracyMeters,
 		); err != nil {
 			locator.Release()
-			return geo.Wrap(platform, "set desired accuracy in meters", err, false)
+			return startedLocator{}, geo.Wrap(
+				platform,
+				"set desired accuracy in meters",
+				err,
+				false,
+			)
 		}
 	}
 	if b.opts.MinimumInterval > 0 {
@@ -138,7 +198,7 @@ func (b *Backend) Start(ctx context.Context) error {
 		}
 		if err := locator.SetReportInterval(uint32(milliseconds)); err != nil {
 			locator.Release()
-			return geo.Wrap(platform, "set report interval", err, false)
+			return startedLocator{}, geo.Wrap(platform, "set report interval", err, false)
 		}
 	}
 
@@ -164,7 +224,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	)
 	if err != nil {
 		locator.Release()
-		return geo.Wrap(platform, "create position handler", err, false)
+		return startedLocator{}, geo.Wrap(platform, "create position handler", err, false)
 	}
 
 	statusEvent, err := geolocation.NewTypedEventHandlerOfGeolocatorAndStatusChangedEventArgs(
@@ -183,7 +243,7 @@ func (b *Backend) Start(ctx context.Context) error {
 	if err != nil {
 		positionEvent.Close()
 		locator.Release()
-		return geo.Wrap(platform, "create status handler", err, false)
+		return startedLocator{}, geo.Wrap(platform, "create status handler", err, false)
 	}
 
 	positionToken, err := locator.AddPositionChanged(positionEvent)
@@ -191,7 +251,7 @@ func (b *Backend) Start(ctx context.Context) error {
 		statusEvent.Close()
 		positionEvent.Close()
 		locator.Release()
-		return geo.Wrap(platform, "subscribe position", err, false)
+		return startedLocator{}, geo.Wrap(platform, "subscribe position", err, false)
 	}
 	statusToken, err := locator.AddStatusChanged(statusEvent)
 	if err != nil {
@@ -199,31 +259,16 @@ func (b *Backend) Start(ctx context.Context) error {
 		statusEvent.Close()
 		positionEvent.Close()
 		locator.Release()
-		return geo.Wrap(platform, "subscribe status", err, false)
+		return startedLocator{}, geo.Wrap(platform, "subscribe status", err, false)
 	}
 
-	b.mu.Lock()
-	b.locator = locator
-	b.positionToken = positionToken
-	b.statusToken = statusToken
-	b.positionEvent = positionEvent
-	b.statusEvent = statusEvent
-	b.mu.Unlock()
-
-	if status, statusErr := locator.LocationStatus(); statusErr == nil {
-		b.publishWindowsStatus(status)
-	} else {
-		b.sink.PublishStatus(
-			geo.Status{
-				State:      geo.StateStarting,
-				Permission: geo.PermissionGranted,
-				Message:    "Windows Geolocator started",
-			},
-		)
-	}
-
-	b.startInitialRead(locator)
-	return nil
+	return startedLocator{
+		locator:       locator,
+		positionToken: positionToken,
+		statusToken:   statusToken,
+		positionEvent: positionEvent,
+		statusEvent:   statusEvent,
+	}, nil
 }
 
 // Stop ends the session. It is safe before or after Start: the stop guard runs

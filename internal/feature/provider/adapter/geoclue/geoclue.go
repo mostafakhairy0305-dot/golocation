@@ -14,6 +14,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/mostafakhairy0305-dot/golocation/geo"
 	provider "github.com/mostafakhairy0305-dot/golocation/internal/feature/provider/port"
+	"github.com/mostafakhairy0305-dot/golocation/internal/shared/retry"
 )
 
 const platform = "linux"
@@ -200,30 +201,25 @@ func (b *Backend) run(ctx context.Context, ready chan<- error) {
 	b.deliver(ctx, current)
 }
 
-// dialUntilReady connects, retrying on the reconnect policy until it succeeds,
-// the policy gives up, or the run is stopped. A permission denial ends it
-// straight away: no amount of retrying changes a decision only the user can.
+// dialUntilReady connects, retrying under exponential backoff until it
+// succeeds, the policy gives up, or the run is stopped. Only failures the geo
+// layer marked temporary are retried, so a permission denial ends it straight
+// away: no amount of retrying changes a decision only the user can make. When
+// reconnection is disabled the connect is attempted exactly once.
 func (b *Backend) dialUntilReady(ctx context.Context) (*session, error) {
-	backoff := b.opts.ReconnectMin
-
-	for {
-		current, err := b.connect(ctx)
-		if err == nil {
-			return current, nil
-		}
-
-		if !b.retryable(err) {
-			return nil, err
-		}
-
-		b.publishReconnecting("waiting for GeoClue")
-
-		if !sleepContext(ctx, backoff) {
-			return nil, geo.Wrap(platform, "start GeoClue", ctx.Err(), true)
-		}
-
-		backoff = b.nextBackoff(backoff)
+	opts := append(
+		b.reconnectBackoff(),
+		retry.WithNotify(func(error, time.Duration) {
+			b.publishReconnecting("waiting for GeoClue")
+		}),
+	)
+	if !b.opts.Reconnect {
+		opts = append(opts, retry.WithMaxTries(1))
 	}
+
+	return retry.Do(ctx, func() (*session, error) {
+		return b.connect(ctx)
+	}, opts...)
 }
 
 // deliver runs the session, and rebuilds it for as long as the reconnect policy
@@ -252,48 +248,57 @@ func (b *Backend) deliver(ctx context.Context, current *session) {
 	}
 }
 
-// redial rebuilds the session after a connection is lost. A nil result means
-// the run is over: stopped, or denied a permission it will not be granted by
-// asking again.
+// redial rebuilds the session after a connection is lost, retrying under
+// exponential backoff and publishing each failed attempt so subscribers see the
+// reconnect in progress. A nil result means the run is over: stopped, or denied
+// a permission it will not be granted by asking again.
 func (b *Backend) redial(ctx context.Context) *session {
-	backoff := b.opts.ReconnectMin
+	opts := append(
+		b.reconnectBackoff(),
+		retry.WithNotify(func(err error, _ time.Duration) {
+			b.sink.PublishError(err)
+		}),
+	)
 
-	for {
-		if !sleepContext(ctx, backoff) {
+	current, err := retry.Do(ctx, func() (*session, error) {
+		return b.connect(ctx)
+	}, opts...)
+	if err != nil {
+		// A cancelled run is a stop, not a failure to report.
+		if ctx.Err() != nil {
 			return nil
-		}
-
-		current, err := b.connect(ctx)
-		if err == nil {
-			return current
 		}
 
 		if errors.Is(err, geo.ErrPermissionDenied) {
 			b.publishDenied()
-			b.sink.PublishError(err)
-
-			return nil
 		}
 
 		b.sink.PublishError(err)
 
-		backoff = b.nextBackoff(backoff)
-	}
-}
-
-// retryable reports whether a failed connection is worth another attempt.
-func (b *Backend) retryable(err error) bool {
-	return b.opts.Reconnect && !errors.Is(err, geo.ErrPermissionDenied)
-}
-
-// nextBackoff grows the reconnect interval, capped by the policy.
-func (b *Backend) nextBackoff(backoff time.Duration) time.Duration {
-	next := backoff * backoffFactor
-	if next > b.opts.ReconnectMax {
-		return b.opts.ReconnectMax
+		return nil
 	}
 
-	return next
+	return current
+}
+
+// reconnectBackoff builds the exponential policy shared by both reconnect
+// paths: a jittered curve between ReconnectMin and ReconnectMax, growing by
+// backoffFactor and bounded only by the run's context. The floors guard a
+// misconfigured policy from turning the loop into a busy loop against the bus.
+func (b *Backend) reconnectBackoff() []retry.Option {
+	minInterval := b.opts.ReconnectMin
+	if minInterval <= 0 {
+		minInterval = defaultBackoff
+	}
+
+	maxInterval := max(b.opts.ReconnectMax, minInterval)
+
+	return []retry.Option{
+		retry.WithInitialInterval(minInterval),
+		retry.WithMaxInterval(maxInterval),
+		retry.WithMultiplier(backoffFactor),
+		retry.WithMaxElapsedTime(0),
+	}
 }
 
 // connect builds a live session: a private bus connection, a configured GeoClue
@@ -939,23 +944,4 @@ func mapGeoClueError(operation string, err error) error {
 	}
 
 	return geo.Wrap(platform, operation, err, true)
-}
-
-// sleepContext waits out duration, and reports whether it got there. The
-// reconnect loop uses the answer to decide whether to try again, so a cancelled
-// context reporting true would keep reconnecting after Stop.
-func sleepContext(ctx context.Context, duration time.Duration) bool {
-	if duration <= 0 {
-		duration = defaultBackoff
-	}
-
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
 }

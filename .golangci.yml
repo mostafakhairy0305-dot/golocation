@@ -36,6 +36,12 @@ linters:
       ignore-names: [tx, db, id, ok]
     tagalign:
       order: [json, exhaustruct]
+    wrapcheck:
+      # internal/retry.Do is a transparent pass-through: it returns the
+      # operation's own error, which the operation has already wrapped. Wrapping
+      # it again at the call site would only double the annotation.
+      ignore-package-globs:
+        - github.com/mostafakhairy0305-dot/golocation/internal/shared/retry
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
